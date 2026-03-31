@@ -1,14 +1,19 @@
 import type {
+  PaperChatRequest,
+  PaperChatResponse,
+  ProjectDetailResponse,
+  ProjectListResponse,
+  ProjectMutationResponse,
+  ProjectPaperSession,
+  ProjectSearchThread,
+  PaperViewerResponse,
   SearchJobResult,
   SearchJobStatus,
   SearchTrace,
-  PaperChatRequest,
-  PaperChatResponse,
-  PaperViewerResponse,
 } from '@/lib/types';
 
 type JsonInit = {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   body?: unknown;
 };
 
@@ -67,4 +72,104 @@ export async function fetchPaperContentList(paperId: string): Promise<unknown> {
 
 export function fetchPaperViewer(paperId: string) {
   return requestJson<PaperViewerResponse>(`/api/papers/${encodeURIComponent(paperId)}/viewer`);
+}
+
+export function paperZoteroPageUrl(paperId: string) {
+  return `/api/papers/${encodeURIComponent(paperId)}/zotero`;
+}
+
+export function paperBibtexExportUrl(paperId: string) {
+  return `/api/papers/${encodeURIComponent(paperId)}/export.bib`;
+}
+
+export function paperRisExportUrl(paperId: string) {
+  return `/api/papers/${encodeURIComponent(paperId)}/export.ris`;
+}
+
+export function listProjects() {
+  return requestJson<ProjectListResponse>('/api/projects');
+}
+
+export function createProject(payload: { title: string }) {
+  return requestJson<{ project_id: string; title: string; created_at: string; updated_at: string; search_thread_count: number; paper_session_count: number }>(
+    '/api/projects',
+    {
+      method: 'POST',
+      body: payload,
+    },
+  );
+}
+
+export function fetchProject(projectId: string) {
+  return requestJson<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(projectId)}`);
+}
+
+export function clearProject(projectId: string) {
+  return requestJson<ProjectMutationResponse>(`/api/projects/${encodeURIComponent(projectId)}/clear`, {
+    method: 'POST',
+  });
+}
+
+export function deleteProject(projectId: string) {
+  return requestJson<ProjectMutationResponse>(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function renameProject(projectId: string, payload: { title: string }) {
+  return requestJson<{ project_id: string; title: string; created_at: string; updated_at: string; search_thread_count: number; paper_session_count: number }>(
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: 'PATCH',
+      body: payload,
+    },
+  );
+}
+
+export function upsertProjectThread(
+  projectId: string,
+  threadId: string,
+  payload: {
+    query: string;
+    trace_id?: string | null;
+    result_counts: Record<string, number>;
+    paper_ids: string[];
+  },
+) {
+  return requestJson<ProjectSearchThread>(
+    `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}`,
+    {
+      method: 'PUT',
+      body: payload,
+    },
+  );
+}
+
+export function upsertProjectPaperSession(
+  projectId: string,
+  paperId: string,
+  payload: {
+    paper_title?: string | null;
+    source_thread_id?: string | null;
+    chat_history: {
+      role: 'user' | 'assistant';
+      content: string;
+      citations: {
+        evidence_id: string;
+        page_start: number;
+        page_end: number;
+        section_path: string[];
+        snippet: string;
+      }[];
+    }[];
+    last_active_evidence_id?: string | null;
+  },
+) {
+  return requestJson<ProjectPaperSession>(
+    `/api/projects/${encodeURIComponent(projectId)}/papers/${encodeURIComponent(paperId)}/session`,
+    {
+      method: 'PUT',
+      body: payload,
+    },
+  );
 }

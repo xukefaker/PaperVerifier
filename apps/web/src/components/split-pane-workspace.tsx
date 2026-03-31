@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject, type UIEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  BookMarked,
   BookOpen,
   ChevronDown,
   ChevronLeft,
   ChevronUp,
   Clock,
   ExternalLink,
+  FileText,
   GripVertical,
   Quote,
   Search,
@@ -22,7 +24,9 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 
 import { ChatMessage } from '@/app/page';
-import { chatWithPaper, fetchPaperViewer } from '@/lib/client-api';
+import { ActivityMark, useTransientActivityMode } from '@/components/activity-mark';
+import { PaperPdfViewer, paperPdfPageDomId } from '@/components/paper-pdf-viewer';
+import { chatWithPaper, fetchPaperViewer, paperZoteroPageUrl } from '@/lib/client-api';
 import {
   ManuscriptOutlineRail,
   ManuscriptOutlineSheet,
@@ -36,11 +40,13 @@ import {
   type WorkspaceMobilePane,
 } from '@/lib/workspace-ui-state';
 import type {
+  EvidenceNavigationTarget,
   PaperChatCitation,
   PaperResult,
   PaperViewerBlock,
   PaperViewerReference,
   PaperViewerResponse,
+  ViewerMode,
 } from '@/lib/types';
 
 type SplitPaneWorkspaceProps = {
@@ -54,6 +60,7 @@ type SplitPaneWorkspaceProps = {
 type ManuscriptPaneProps = {
   viewer: PaperViewerResponse | null;
   isLoading: boolean;
+  viewerMode: ViewerMode;
   scrollProgress: number;
   activeBlock: PaperViewerBlock | null;
   previewBlockId: string | null;
@@ -62,16 +69,23 @@ type ManuscriptPaneProps = {
   linkedSectionCueBlockId: string | null;
   linkedCueBlockId: string | null;
   flashBlockId: string | null;
+  activePdfTarget: EvidenceNavigationTarget['pdf_target'] | null;
+  previewPdfTarget: EvidenceNavigationTarget['pdf_target'] | null;
+  linkedPdfTarget: EvidenceNavigationTarget['pdf_target'] | null;
   outlineItems: ManuscriptOutlineItem[];
   activeSectionBlockId: string | null;
   showOutlineRail: boolean;
   outlineSheetOpen: boolean;
-  scrollContainerRef: RefObject<HTMLDivElement | null>;
+  manuscriptScrollContainerRef: RefObject<HTMLDivElement | null>;
+  pdfScrollContainerRef: RefObject<HTMLDivElement | null>;
   onClearActiveEvidence: () => void;
+  onViewerModeChange: (nextMode: ViewerMode) => void;
+  onPdfDocumentStateChange: (state: { isReady: boolean; pageCount: number }) => void;
   onOpenOutlineSheet: () => void;
   onOutlineSheetClose: () => void;
   onSelectOutlineItem: (blockId: string) => void;
-  onScroll: (event: UIEvent<HTMLDivElement>) => void;
+  onManuscriptScroll: (event: UIEvent<HTMLDivElement>) => void;
+  onPdfScroll: (event: UIEvent<HTMLDivElement>) => void;
 };
 
 type WorkspaceViewportMode = 'mobile' | 'tablet' | 'desktop';
@@ -404,6 +418,7 @@ function ManuscriptLoadingState() {
 function ManuscriptPane({
   viewer,
   isLoading,
+  viewerMode,
   scrollProgress,
   activeBlock,
   previewBlockId,
@@ -412,16 +427,23 @@ function ManuscriptPane({
   linkedSectionCueBlockId,
   linkedCueBlockId,
   flashBlockId,
+  activePdfTarget,
+  previewPdfTarget,
+  linkedPdfTarget,
   outlineItems,
   activeSectionBlockId,
   showOutlineRail,
   outlineSheetOpen,
-  scrollContainerRef,
+  manuscriptScrollContainerRef,
+  pdfScrollContainerRef,
   onClearActiveEvidence,
+  onViewerModeChange,
+  onPdfDocumentStateChange,
   onOpenOutlineSheet,
   onOutlineSheetClose,
   onSelectOutlineItem,
-  onScroll,
+  onManuscriptScroll,
+  onPdfScroll,
 }: ManuscriptPaneProps) {
   const byline = useMemo(() => {
     const authors = viewer?.display_header?.authors_structured ?? [];
@@ -458,7 +480,29 @@ function ManuscriptPane({
             </h2>
           </div>
           <div className="flex items-start gap-2">
-            {!showOutlineRail && outlineItems.length > 0 ? (
+            <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-scholar-sm">
+              <button
+                type="button"
+                onClick={() => onViewerModeChange('manuscript')}
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.66rem] font-bold uppercase tracking-[0.18em] transition ${
+                  viewerMode === 'manuscript' ? 'bg-slate-950 text-white' : 'text-slate-500 hover:text-indigo-600'
+                }`}
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                Manuscript
+              </button>
+              <button
+                type="button"
+                onClick={() => onViewerModeChange('pdf')}
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.66rem] font-bold uppercase tracking-[0.18em] transition ${
+                  viewerMode === 'pdf' ? 'bg-slate-950 text-white' : 'text-slate-500 hover:text-indigo-600'
+                }`}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                PDF
+              </button>
+            </div>
+            {viewerMode === 'manuscript' && !showOutlineRail && outlineItems.length > 0 ? (
               <button
                 type="button"
                 onClick={onOpenOutlineSheet}
@@ -482,93 +526,118 @@ function ManuscriptPane({
         </div>
       </div>
 
-      <div
-        ref={scrollContainerRef}
-        onScroll={onScroll}
-        className="custom-scrollbar relative flex-1 overflow-y-auto scroll-smooth px-6 py-8 selection:bg-indigo-100 sm:px-8"
-      >
-        {isLoading ? (
-          <ManuscriptLoadingState />
-        ) : viewer && viewer.blocks.length > 0 ? (
-          <div className={`mx-auto pb-28 ${showOutlineRail ? 'max-w-[1240px]' : 'max-w-[980px]'}`}>
-            <div className={`flex items-start gap-6 ${showOutlineRail ? 'xl:gap-8' : ''}`}>
-              <div className="min-w-0 flex-1">
-                <div className="manuscript-canvas px-7 py-8 sm:px-10 sm:py-10">
-                  {byline || affiliationLine ? (
-                    <section className="mb-10 border-b border-slate-200/80 pb-8">
-                      {byline ? <div className="text-[1.04rem] font-semibold leading-7 text-slate-800">{byline}</div> : null}
-                      {affiliationLine ? (
-                        <div className="font-scholar mt-2 text-[1rem] italic leading-7 text-slate-500">{affiliationLine}</div>
-                      ) : null}
-                    </section>
-                  ) : null}
+      <div className="relative flex-1 overflow-hidden">
+        <div
+          ref={manuscriptScrollContainerRef}
+          onScroll={onManuscriptScroll}
+          aria-hidden={viewerMode !== 'manuscript'}
+          className={`custom-scrollbar absolute inset-0 overflow-y-auto scroll-smooth px-6 py-8 selection:bg-indigo-100 transition-opacity duration-200 sm:px-8 ${
+            viewerMode === 'manuscript' ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+          }`}
+        >
+          {isLoading ? (
+            <ManuscriptLoadingState />
+          ) : viewer && viewer.blocks.length > 0 ? (
+            <div className={`mx-auto pb-28 ${showOutlineRail ? 'max-w-[1240px]' : 'max-w-[980px]'}`}>
+              <div className={`flex items-start gap-6 ${showOutlineRail ? 'xl:gap-8' : ''}`}>
+                <div className="min-w-0 flex-1">
+                  <div className="manuscript-canvas px-7 py-8 sm:px-10 sm:py-10">
+                    {byline || affiliationLine ? (
+                      <section className="mb-10 border-b border-slate-200/80 pb-8">
+                        {byline ? <div className="text-[1.04rem] font-semibold leading-7 text-slate-800">{byline}</div> : null}
+                        {affiliationLine ? (
+                          <div className="font-scholar mt-2 text-[1rem] italic leading-7 text-slate-500">{affiliationLine}</div>
+                        ) : null}
+                      </section>
+                    ) : null}
 
-                  <div className="space-y-8">
-                    {viewer.blocks.map((block) => {
-                      const directHighlightMode: EvidenceHighlightMode =
-                        previewBlockId === block.block_id
-                          ? 'preview'
-                          : activeBlock?.block_id === block.block_id
-                            ? 'active'
-                            : linkedCueBlockId === block.block_id
-                              ? 'linked'
-                              : 'none';
-                      const sectionHighlightMode: EvidenceHighlightMode =
-                        block.block_type === 'section_heading'
-                          ? previewSectionCueBlockId === block.block_id
+                    <div className="space-y-8">
+                      {viewer.blocks.map((block) => {
+                        const directHighlightMode: EvidenceHighlightMode =
+                          previewBlockId === block.block_id
                             ? 'preview'
-                            : activeSectionCueBlockId === block.block_id || linkedSectionCueBlockId === block.block_id
-                              ? 'linked'
-                              : 'none'
-                          : 'none';
-                      const highlightMode = directHighlightMode !== 'none' ? directHighlightMode : sectionHighlightMode;
+                            : activeBlock?.block_id === block.block_id
+                              ? 'active'
+                              : linkedCueBlockId === block.block_id
+                                ? 'linked'
+                                : 'none';
+                        const sectionHighlightMode: EvidenceHighlightMode =
+                          block.block_type === 'section_heading'
+                            ? previewSectionCueBlockId === block.block_id
+                              ? 'preview'
+                              : activeSectionCueBlockId === block.block_id || linkedSectionCueBlockId === block.block_id
+                                ? 'linked'
+                                : 'none'
+                            : 'none';
+                        const highlightMode = directHighlightMode !== 'none' ? directHighlightMode : sectionHighlightMode;
 
-                      return (
-                      <ViewerBlock
-                        key={block.block_id}
-                        block={block}
-                        highlightMode={highlightMode}
-                        shouldFlash={flashBlockId === block.block_id}
-                      />
-                      );
-                    })}
+                        return (
+                          <ViewerBlock
+                            key={block.block_id}
+                            block={block}
+                            highlightMode={highlightMode}
+                            shouldFlash={flashBlockId === block.block_id}
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {viewer.references && viewer.references.length > 0 ? (
+                      <ReferencesAppendix references={viewer.references} />
+                    ) : null}
                   </div>
-
-                  {viewer.references && viewer.references.length > 0 ? (
-                    <ReferencesAppendix references={viewer.references} />
-                  ) : null}
                 </div>
+
+                {showOutlineRail ? (
+                  <ManuscriptOutlineRail
+                    items={outlineItems}
+                    activeBlockId={activeSectionBlockId}
+                    previewBlockId={previewSectionCueBlockId}
+                    cueBlockId={activeSectionCueBlockId ?? linkedSectionCueBlockId}
+                    onSelect={onSelectOutlineItem}
+                  />
+                ) : null}
               </div>
-
-              {showOutlineRail ? (
-                <ManuscriptOutlineRail
-                  items={outlineItems}
-                  activeBlockId={activeSectionBlockId}
-                  previewBlockId={previewSectionCueBlockId}
-                  cueBlockId={activeSectionCueBlockId ?? linkedSectionCueBlockId}
-                  onSelect={onSelectOutlineItem}
-                />
-              ) : null}
             </div>
-          </div>
-        ) : (
-          <div className="mx-auto flex h-full max-w-[780px] flex-col items-center justify-center">
-            <div className="rounded-[2rem] border border-slate-200/85 bg-white/92 px-10 py-12 text-center shadow-scholar-sm">
-              <div className="text-[0.72rem] font-bold uppercase tracking-[0.22em] text-slate-400">Manuscript</div>
-              <div className="mt-3 text-[1rem] leading-7 text-slate-500">No manuscript content available.</div>
+          ) : (
+            <div className="mx-auto flex h-full max-w-[780px] flex-col items-center justify-center">
+              <div className="rounded-[2rem] border border-slate-200/85 bg-white/92 px-10 py-12 text-center shadow-scholar-sm">
+                <div className="text-[0.72rem] font-bold uppercase tracking-[0.22em] text-slate-400">Manuscript</div>
+                <div className="mt-3 text-[1rem] leading-7 text-slate-500">No manuscript content available.</div>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        <ManuscriptOutlineSheet
-          items={outlineItems}
-          activeBlockId={activeSectionBlockId}
-          previewBlockId={previewSectionCueBlockId}
-          cueBlockId={activeSectionCueBlockId ?? linkedSectionCueBlockId}
-          onSelect={onSelectOutlineItem}
-          open={outlineSheetOpen}
-          onClose={onOutlineSheetClose}
-        />
+        <div
+          ref={pdfScrollContainerRef}
+          onScroll={onPdfScroll}
+          aria-hidden={viewerMode !== 'pdf'}
+          className={`custom-scrollbar absolute inset-0 overflow-y-auto scroll-smooth px-6 py-8 selection:bg-indigo-100 transition-opacity duration-200 sm:px-8 ${
+            viewerMode === 'pdf' ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+          }`}
+        >
+          <PaperPdfViewer
+            pdfUrl={viewer?.pdf_url ?? null}
+            scrollContainerRef={pdfScrollContainerRef}
+            activeTarget={activePdfTarget}
+            previewTarget={previewPdfTarget}
+            linkedTarget={linkedPdfTarget}
+            onDocumentStateChange={onPdfDocumentStateChange}
+          />
+        </div>
+
+        {viewerMode === 'manuscript' ? (
+          <ManuscriptOutlineSheet
+            items={outlineItems}
+            activeBlockId={activeSectionBlockId}
+            previewBlockId={previewSectionCueBlockId}
+            cueBlockId={activeSectionCueBlockId ?? linkedSectionCueBlockId}
+            onSelect={onSelectOutlineItem}
+            open={outlineSheetOpen}
+            onClose={onOutlineSheetClose}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -593,12 +662,14 @@ export function SplitPaneWorkspace({
   const [flashBlockId, setFlashBlockId] = useState<string | null>(null);
   const [viewer, setViewer] = useState<PaperViewerResponse | null>(null);
   const [isViewerLoading, setIsViewerLoading] = useState(true);
+  const [viewerMode, setViewerMode] = useState<ViewerMode>('manuscript');
   const [leftWidth, setLeftWidth] = useState(() => loadWorkspaceUiState().desktopSplitPct);
   const [isDragging, setIsDragging] = useState(false);
   const [isRationaleOpen, setIsRationaleOpen] = useState(() => loadWorkspaceUiState().rationaleOpen);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [activeSectionBlockId, setActiveSectionBlockId] = useState<string | null>(null);
   const [isOutlineOpen, setIsOutlineOpen] = useState(false);
+  const [pdfReadyPageCount, setPdfReadyPageCount] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth : DESKTOP_RESIZABLE_BREAKPOINT,
   );
@@ -614,6 +685,7 @@ export function SplitPaneWorkspace({
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const pendingEvidenceIdRef = useRef<string | null>(null);
   const manuscriptScrollRef = useRef<HTMLDivElement>(null);
+  const pdfScrollRef = useRef<HTMLDivElement>(null);
   const flashTimeoutRef = useRef<number | null>(null);
   const linkedCueTimeoutRef = useRef<number | null>(null);
   const draggingPointerIdRef = useRef<number | null>(null);
@@ -631,6 +703,14 @@ export function SplitPaneWorkspace({
     () => ['Reading manuscript evidence', 'Aligning supporting passages', 'Drafting the answer'],
     [],
   );
+  const chatActivityMode = useTransientActivityMode(isTyping);
+  const chatActivityLabel = chatActivityMode === 'active'
+    ? typingPhaseIndex < 2
+      ? 'Reading'
+      : 'Thinking'
+    : chatActivityMode === 'done'
+      ? 'Ready'
+      : null;
 
   const startDragging = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (viewportMode !== 'desktop') {
@@ -711,12 +791,20 @@ export function SplitPaneWorkspace({
     return mapping;
   }, [viewer]);
 
-  const resolveBlockIdForEvidence = useCallback((evidenceId: string | null | undefined): string | null => {
+  const resolveNavigationTargetForEvidence = useCallback((evidenceId: string | null | undefined): EvidenceNavigationTarget | null => {
     if (!evidenceId) {
       return null;
     }
-    return viewer?.evidence_anchor_map[evidenceId] ?? null;
+    return viewer?.evidence_navigation_map[evidenceId] ?? null;
   }, [viewer]);
+
+  const resolveMarkdownBlockIdForEvidence = useCallback((evidenceId: string | null | undefined): string | null => {
+    return resolveNavigationTargetForEvidence(evidenceId)?.markdown_target?.block_id ?? null;
+  }, [resolveNavigationTargetForEvidence]);
+
+  const resolvePdfTargetForEvidence = useCallback((evidenceId: string | null | undefined) => {
+    return resolveNavigationTargetForEvidence(evidenceId)?.pdf_target ?? null;
+  }, [resolveNavigationTargetForEvidence]);
 
   const resolveSectionHeadingIdForBlock = useCallback((blockId: string | null | undefined): string | null => {
     if (!blockId) {
@@ -724,6 +812,19 @@ export function SplitPaneWorkspace({
     }
     return sectionHeadingByBlockId[blockId] ?? null;
   }, [sectionHeadingByBlockId]);
+
+  const resolveSectionHeadingIdForEvidence = useCallback((evidenceId: string | null | undefined): string | null => {
+    const navigationTarget = resolveNavigationTargetForEvidence(evidenceId);
+    const explicitSectionBlockId = navigationTarget?.markdown_target?.section_block_id ?? null;
+    if (explicitSectionBlockId) {
+      return explicitSectionBlockId;
+    }
+    const blockId = navigationTarget?.markdown_target?.block_id ?? null;
+    if (!blockId) {
+      return null;
+    }
+    return sectionHeadingByBlockId[blockId] ?? null;
+  }, [resolveNavigationTargetForEvidence, sectionHeadingByBlockId]);
 
   const scrollToBlockId = useCallback((blockId: string, behavior: ScrollBehavior = 'smooth'): boolean => {
     const target = document.getElementById(viewerBlockDomId(blockId));
@@ -739,6 +840,25 @@ export function SplitPaneWorkspace({
     const containerRect = container.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
     const readingOffset = Math.max(92, Math.min(144, Math.round(container.clientHeight * 0.14)));
+    const top = container.scrollTop + (targetRect.top - containerRect.top) - readingOffset;
+    container.scrollTo({ top: Math.max(0, top), behavior });
+    return true;
+  }, []);
+
+  const scrollToPdfPage = useCallback((pageNumber: number, behavior: ScrollBehavior = 'smooth'): boolean => {
+    const target = document.getElementById(paperPdfPageDomId(pageNumber));
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    const container = pdfScrollRef.current;
+    if (!(container instanceof HTMLElement)) {
+      target.scrollIntoView({ behavior, block: 'start' });
+      return true;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const readingOffset = Math.max(76, Math.min(132, Math.round(container.clientHeight * 0.1)));
     const top = container.scrollTop + (targetRect.top - containerRect.top) - readingOffset;
     container.scrollTo({ top: Math.max(0, top), behavior });
     return true;
@@ -762,7 +882,36 @@ export function SplitPaneWorkspace({
 
   const focusEvidence = useCallback(
     (evidenceId: string, shouldScroll: boolean): boolean => {
-      const blockId = resolveBlockIdForEvidence(evidenceId);
+      const navigationTarget = resolveNavigationTargetForEvidence(evidenceId);
+      const blockId = navigationTarget?.markdown_target?.block_id ?? null;
+      const sectionBlockId = navigationTarget?.markdown_target?.section_block_id ?? null;
+      const pdfTarget = navigationTarget?.pdf_target ?? null;
+
+      if (viewerMode === 'pdf') {
+        const primaryPage = pdfTarget?.primary_page ?? null;
+        if (!primaryPage) {
+          pendingEvidenceIdRef.current = evidenceId;
+          return false;
+        }
+        const pageTarget = document.getElementById(paperPdfPageDomId(primaryPage));
+        if (!(pageTarget instanceof HTMLElement)) {
+          pendingEvidenceIdRef.current = evidenceId;
+          return false;
+        }
+
+        pendingEvidenceIdRef.current = null;
+        setPreviewEvidenceId(null);
+        clearLinkedCue();
+        clearActiveHighlight();
+        setActiveBlockId(blockId);
+        setActiveSectionBlockId(sectionBlockId ?? resolveSectionHeadingIdForBlock(blockId));
+
+        if (shouldScroll) {
+          scrollToPdfPage(primaryPage, 'smooth');
+        }
+        return true;
+      }
+
       if (!blockId) {
         pendingEvidenceIdRef.current = evidenceId;
         return false;
@@ -779,7 +928,7 @@ export function SplitPaneWorkspace({
       clearLinkedCue();
       clearActiveHighlight();
       setActiveBlockId(blockId);
-      setActiveSectionBlockId(resolveSectionHeadingIdForBlock(blockId));
+      setActiveSectionBlockId(sectionBlockId ?? resolveSectionHeadingIdForBlock(blockId));
       setFlashBlockId(blockId);
 
       if (flashTimeoutRef.current !== null) {
@@ -795,7 +944,15 @@ export function SplitPaneWorkspace({
       }
       return true;
     },
-    [clearActiveHighlight, clearLinkedCue, resolveBlockIdForEvidence, resolveSectionHeadingIdForBlock, scrollToBlockId],
+    [
+      clearActiveHighlight,
+      clearLinkedCue,
+      resolveNavigationTargetForEvidence,
+      resolveSectionHeadingIdForBlock,
+      scrollToBlockId,
+      scrollToPdfPage,
+      viewerMode,
+    ],
   );
 
   const activateCitation = useCallback(
@@ -852,6 +1009,19 @@ export function SplitPaneWorkspace({
   }, [isRationaleOpen]);
 
   useEffect(() => {
+    const element = viewerMode === 'pdf' ? pdfScrollRef.current : manuscriptScrollRef.current;
+    if (!(element instanceof HTMLDivElement)) {
+      return;
+    }
+    const scrollRange = element.scrollHeight - element.clientHeight;
+    if (scrollRange <= 0) {
+      setScrollProgress(0);
+      return;
+    }
+    setScrollProgress((element.scrollTop / scrollRange) * 100);
+  }, [viewerMode]);
+
+  useEffect(() => {
     if (viewportMode !== 'desktop' && isDragging) {
       stopDragging();
     }
@@ -893,6 +1063,7 @@ export function SplitPaneWorkspace({
       setScrollProgress(0);
       setActiveSectionBlockId(null);
       setIsOutlineOpen(false);
+      setPdfReadyPageCount(0);
       clearActiveEvidence();
       try {
         const payload = await fetchPaperViewer(paper.paper_id);
@@ -985,9 +1156,22 @@ export function SplitPaneWorkspace({
       focusEvidence(pendingEvidenceId, true);
     });
     return () => window.cancelAnimationFrame(frameId);
-  }, [focusEvidence, isMobile, isViewerLoading, mobilePane, viewer]);
+  }, [focusEvidence, isMobile, isViewerLoading, mobilePane, pdfReadyPageCount, viewer]);
 
-  const handleScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+  useEffect(() => {
+    if (!activeEvidenceId || isViewerLoading) {
+      return;
+    }
+    if (isMobile && mobilePane !== 'manuscript') {
+      return;
+    }
+    const frameId = window.requestAnimationFrame(() => {
+      focusEvidence(activeEvidenceId, true);
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeEvidenceId, focusEvidence, isMobile, isViewerLoading, mobilePane, viewerMode]);
+
+  const handleManuscriptScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget as HTMLDivElement | null;
     if (!element) {
       return;
@@ -1018,6 +1202,19 @@ export function SplitPaneWorkspace({
     }
     setActiveSectionBlockId((current) => (current === nextActiveSectionId ? current : nextActiveSectionId));
   }, [sectionOutlineItems]);
+
+  const handlePdfScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    const element = event.currentTarget as HTMLDivElement | null;
+    if (!element) {
+      return;
+    }
+    const scrollRange = element.scrollHeight - element.clientHeight;
+    if (scrollRange <= 0) {
+      setScrollProgress(0);
+      return;
+    }
+    setScrollProgress((element.scrollTop / scrollRange) * 100);
+  }, []);
 
   const handleSelectOutlineItem = useCallback((blockId: string) => {
     setActiveSectionBlockId(blockId);
@@ -1063,27 +1260,51 @@ export function SplitPaneWorkspace({
     if (activeEvidenceId && previewEvidenceId === activeEvidenceId) {
       return null;
     }
-    return resolveBlockIdForEvidence(previewEvidenceId);
-  }, [activeEvidenceId, previewEvidenceId, resolveBlockIdForEvidence]);
+    return resolveMarkdownBlockIdForEvidence(previewEvidenceId);
+  }, [activeEvidenceId, previewEvidenceId, resolveMarkdownBlockIdForEvidence]);
 
   const linkedCueBlockId = useMemo(() => {
     if (activeEvidenceId || previewEvidenceId) {
       return null;
     }
-    return resolveBlockIdForEvidence(linkedCueEvidenceId);
-  }, [activeEvidenceId, linkedCueEvidenceId, previewEvidenceId, resolveBlockIdForEvidence]);
+    return resolveMarkdownBlockIdForEvidence(linkedCueEvidenceId);
+  }, [activeEvidenceId, linkedCueEvidenceId, previewEvidenceId, resolveMarkdownBlockIdForEvidence]);
+
+  const activePdfTarget = useMemo(() => {
+    return activeEvidenceId ? resolvePdfTargetForEvidence(activeEvidenceId) : null;
+  }, [activeEvidenceId, resolvePdfTargetForEvidence]);
+
+  const previewPdfTarget = useMemo(() => {
+    if (activeEvidenceId && previewEvidenceId === activeEvidenceId) {
+      return null;
+    }
+    return resolvePdfTargetForEvidence(previewEvidenceId);
+  }, [activeEvidenceId, previewEvidenceId, resolvePdfTargetForEvidence]);
+
+  const linkedPdfTarget = useMemo(() => {
+    if (activeEvidenceId || previewEvidenceId) {
+      return null;
+    }
+    return resolvePdfTargetForEvidence(linkedCueEvidenceId);
+  }, [activeEvidenceId, linkedCueEvidenceId, previewEvidenceId, resolvePdfTargetForEvidence]);
 
   const activeSectionCueBlockId = useMemo(() => {
-    return resolveSectionHeadingIdForBlock(activeBlockId);
-  }, [activeBlockId, resolveSectionHeadingIdForBlock]);
+    return activeEvidenceId
+      ? resolveSectionHeadingIdForEvidence(activeEvidenceId)
+      : resolveSectionHeadingIdForBlock(activeBlockId);
+  }, [activeBlockId, activeEvidenceId, resolveSectionHeadingIdForBlock, resolveSectionHeadingIdForEvidence]);
 
   const previewSectionCueBlockId = useMemo(() => {
-    return resolveSectionHeadingIdForBlock(previewBlockId);
-  }, [previewBlockId, resolveSectionHeadingIdForBlock]);
+    return previewEvidenceId
+      ? resolveSectionHeadingIdForEvidence(previewEvidenceId)
+      : resolveSectionHeadingIdForBlock(previewBlockId);
+  }, [previewBlockId, previewEvidenceId, resolveSectionHeadingIdForBlock, resolveSectionHeadingIdForEvidence]);
 
   const linkedSectionCueBlockId = useMemo(() => {
-    return resolveSectionHeadingIdForBlock(linkedCueBlockId);
-  }, [linkedCueBlockId, resolveSectionHeadingIdForBlock]);
+    return linkedCueEvidenceId
+      ? resolveSectionHeadingIdForEvidence(linkedCueEvidenceId)
+      : resolveSectionHeadingIdForBlock(linkedCueBlockId);
+  }, [linkedCueBlockId, linkedCueEvidenceId, resolveSectionHeadingIdForBlock, resolveSectionHeadingIdForEvidence]);
 
   const activeBlock = useMemo(() => {
     if (!viewer || !activeBlockId) {
@@ -1106,7 +1327,7 @@ export function SplitPaneWorkspace({
   const renderChatPane = (showHeader: boolean) => (
     <div className="flex h-full min-h-0 flex-col bg-[#F7F9FC]">
       {showHeader ? (
-        <div className="flex items-center justify-between border-b border-slate-200/60 bg-[#F7F9FC]/85 px-6 py-4 backdrop-blur-md">
+        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/60 bg-[#F7F9FC]/92 px-6 py-4 backdrop-blur-xl">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -1124,6 +1345,15 @@ export function SplitPaneWorkspace({
               <Search className="h-3.5 w-3.5" />
               Search
             </button>
+            <a
+              href={paperZoteroPageUrl(paper.paper_id)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-[0.72rem] font-bold uppercase tracking-[0.2em] text-slate-600 shadow-scholar-sm transition hover:border-indigo-200 hover:text-indigo-600"
+            >
+              <BookMarked className="h-3.5 w-3.5" />
+              Save to Zotero
+            </a>
           </div>
           <div className="text-[0.66rem] font-bold uppercase tracking-[0.26em] text-indigo-400">
             {paper.venue.toUpperCase()} {paper.year}
@@ -1199,8 +1429,16 @@ export function SplitPaneWorkspace({
                   >
                     {message.role === 'assistant' ? (
                       <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-[0.66rem] font-bold uppercase tracking-[0.2em] text-slate-400">Paper chat</div>
-                        {isLatestAssistant && message.citations?.length ? (
+                        <div className="flex items-center gap-3">
+                          <ActivityMark
+                            mode={isLatestAssistant && chatActivityMode === 'done' ? 'done' : 'idle'}
+                            label={isLatestAssistant && chatActivityMode === 'done' ? 'Ready' : null}
+                            layout="inline"
+                            size="sm"
+                          />
+                          <div className="text-[0.66rem] font-bold uppercase tracking-[0.2em] text-slate-400">Paper chat</div>
+                        </div>
+                        {isLatestAssistant && chatActivityMode === 'done' ? (
                           <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50/80 px-2.5 py-1 text-[0.58rem] font-bold uppercase tracking-[0.18em] text-indigo-600">
                             <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
                             Answer ready
@@ -1378,13 +1616,21 @@ export function SplitPaneWorkspace({
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start">
               <div className="w-full max-w-[92%] rounded-[1.8rem] rounded-bl-md border border-slate-200/70 bg-white p-6 shadow-scholar-sm">
                 <div className="mb-4 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-[0.66rem] font-bold uppercase tracking-[0.22em] text-indigo-500">
-                    <div className="chat-typing-dots inline-flex items-center gap-1.5">
-                      <span />
-                      <span />
-                      <span />
+                  <div className="flex items-center gap-3">
+                    <ActivityMark
+                      mode="active"
+                      label={null}
+                      layout="inline"
+                      size="sm"
+                    />
+                    <div className="flex flex-col">
+                      <div className="text-[0.66rem] font-bold uppercase tracking-[0.22em] text-indigo-500">
+                        {typingPhases[typingPhaseIndex]}
+                      </div>
+                      <div className="mt-1 text-[0.78rem] text-slate-500">
+                        Gathering the most relevant passages before drafting the reply.
+                      </div>
                     </div>
-                    {typingPhases[typingPhaseIndex]}
                   </div>
                   <div className="rounded-full border border-indigo-100 bg-indigo-50/80 px-2.5 py-1 text-[0.58rem] font-bold uppercase tracking-[0.18em] text-indigo-600">
                     Deep chat
@@ -1436,6 +1682,7 @@ export function SplitPaneWorkspace({
     <ManuscriptPane
       viewer={viewer}
       isLoading={isViewerLoading}
+      viewerMode={viewerMode}
       scrollProgress={scrollProgress}
       activeBlock={activeBlock}
       previewBlockId={previewBlockId}
@@ -1444,16 +1691,23 @@ export function SplitPaneWorkspace({
       linkedSectionCueBlockId={linkedSectionCueBlockId}
       linkedCueBlockId={linkedCueBlockId}
       flashBlockId={flashBlockId}
+      activePdfTarget={activePdfTarget}
+      previewPdfTarget={previewPdfTarget}
+      linkedPdfTarget={linkedPdfTarget}
       outlineItems={sectionOutlineItems}
       activeSectionBlockId={activeSectionBlockId}
-      showOutlineRail={viewportMode === 'desktop'}
+      showOutlineRail={viewportMode === 'desktop' && viewerMode === 'manuscript'}
       outlineSheetOpen={isOutlineOpen}
-      scrollContainerRef={manuscriptScrollRef}
+      manuscriptScrollContainerRef={manuscriptScrollRef}
+      pdfScrollContainerRef={pdfScrollRef}
       onClearActiveEvidence={clearActiveEvidence}
+      onViewerModeChange={setViewerMode}
+      onPdfDocumentStateChange={({ pageCount }) => setPdfReadyPageCount(pageCount)}
       onOpenOutlineSheet={() => setIsOutlineOpen(true)}
       onOutlineSheetClose={() => setIsOutlineOpen(false)}
       onSelectOutlineItem={handleSelectOutlineItem}
-      onScroll={handleScroll}
+      onManuscriptScroll={handleManuscriptScroll}
+      onPdfScroll={handlePdfScroll}
     />
   );
 
@@ -1479,6 +1733,15 @@ export function SplitPaneWorkspace({
               >
                 <Search className="h-4 w-4" />
               </button>
+              <a
+                href={paperZoteroPageUrl(paper.paper_id)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-scholar-sm transition hover:border-indigo-200 hover:text-indigo-600"
+                aria-label="Save to Zotero"
+              >
+                <BookMarked className="h-4 w-4" />
+              </a>
             </div>
             <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-scholar-sm">
               <button

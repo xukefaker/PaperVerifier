@@ -18,6 +18,7 @@ from .jobs import SearchJobManager
 from .routes.chat import router as chat_router
 from .routes.health import router as health_router
 from .routes.papers import router as papers_router
+from .routes.projects import router as projects_router
 from .routes.search import router as search_router
 from .routes.traces import router as traces_router
 
@@ -274,6 +275,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api", tags=["health"])
     app.include_router(search_router, prefix="/api", tags=["search"])
     app.include_router(papers_router, prefix="/api", tags=["papers"])
+    app.include_router(projects_router, prefix="/api", tags=["projects"])
     app.include_router(chat_router, prefix="/api", tags=["chat"])
     app.include_router(traces_router, prefix="/api", tags=["traces"])
     return app

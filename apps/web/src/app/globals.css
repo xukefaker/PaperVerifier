@@ -199,6 +199,111 @@ img {
   animation: assistant-answer-ready 1.05s ease-out;
 }
 
+.psa-activity-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.psa-activity-mark-aura,
+.psa-activity-mark-shell {
+  position: absolute;
+  inset: 0;
+}
+
+.psa-activity-mark-aura {
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transform: scale(0.92);
+  background:
+    radial-gradient(circle at center, rgba(79, 70, 229, 0.24), rgba(79, 70, 229, 0.08) 46%, transparent 74%);
+  filter: blur(12px);
+}
+
+.psa-activity-mark-shell {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  background: linear-gradient(135deg, #0f172a 0%, #111827 100%);
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition:
+    transform 220ms ease,
+    box-shadow 240ms ease,
+    background 240ms ease,
+    border-color 240ms ease;
+}
+
+.psa-activity-mark-shell::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: -28%;
+  opacity: 0;
+  background: linear-gradient(
+    120deg,
+    transparent 6%,
+    rgba(255, 255, 255, 0.14) 28%,
+    rgba(165, 180, 252, 0.22) 48%,
+    transparent 72%
+  );
+  transform: translateX(-120%);
+}
+
+.psa-activity-mark--active .psa-activity-mark-aura {
+  opacity: 1;
+  animation: psa-activity-aura-pulse 2.3s ease-in-out infinite;
+}
+
+.psa-activity-mark--active .psa-activity-mark-shell {
+  background:
+    linear-gradient(135deg, #0f172a 0%, #111827 34%, #312e81 68%, #4f46e5 100%);
+  background-size: 220% 220%;
+  box-shadow:
+    0 12px 30px rgba(79, 70, 229, 0.2),
+    0 0 0 1px rgba(129, 140, 248, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  animation: psa-activity-gradient-shift 3.6s linear infinite;
+}
+
+.psa-activity-mark--active .psa-activity-mark-shell::before {
+  opacity: 1;
+  animation: psa-activity-sheen 2.6s ease-in-out infinite;
+}
+
+.psa-activity-mark--done .psa-activity-mark-aura {
+  opacity: 1;
+  animation: psa-activity-aura-settle 1.25s ease-out forwards;
+}
+
+.psa-activity-mark--done .psa-activity-mark-shell {
+  background: linear-gradient(135deg, #0f172a 0%, #1f2341 44%, #4338ca 100%);
+  box-shadow:
+    0 12px 28px rgba(79, 70, 229, 0.18),
+    0 0 0 1px rgba(129, 140, 248, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+  animation: psa-activity-done-pop 1s ease-out;
+}
+
+.psa-activity-mark--done .psa-activity-mark-shell::before {
+  opacity: 0.8;
+  animation: psa-activity-sheen-once 1.1s ease-out forwards;
+}
+
+.psa-activity-mark-label {
+  display: inline-block;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: rgba(79, 70, 229, 0.9);
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease;
+}
+
 .chat-typing-dots span {
   display: inline-block;
   width: 0.34rem;
@@ -312,6 +417,77 @@ img {
   }
 }
 
+@keyframes psa-activity-gradient-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes psa-activity-aura-pulse {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.42;
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 0.82;
+  }
+}
+
+@keyframes psa-activity-aura-settle {
+  0% {
+    transform: scale(1.04);
+    opacity: 0.72;
+  }
+  100% {
+    transform: scale(1.22);
+    opacity: 0;
+  }
+}
+
+@keyframes psa-activity-sheen {
+  0% {
+    transform: translateX(-120%);
+  }
+  60% {
+    transform: translateX(118%);
+  }
+  100% {
+    transform: translateX(118%);
+  }
+}
+
+@keyframes psa-activity-sheen-once {
+  0% {
+    transform: translateX(-120%);
+    opacity: 0.82;
+  }
+  70% {
+    transform: translateX(118%);
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateX(118%);
+    opacity: 0;
+  }
+}
+
+@keyframes psa-activity-done-pop {
+  0% {
+    transform: translateY(-1px) scale(0.98);
+  }
+  35% {
+    transform: translateY(-2px) scale(1.03);
+  }
+  100% {
+    transform: translateY(-1px) scale(1);
+  }
+}
+
 @keyframes highlight-fade-scholar {
   0% {
     background-color: rgba(251, 191, 36, 0.28);
@@ -326,16 +502,36 @@ img {
 }
 
 .skeleton-pulse {
-  background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 50%, #eef2f7 75%);
-  background-size: 200% 100%;
-  animation: skeleton-loading 1.5s infinite;
+  background: #eef2f7;
+  animation: skeleton-breathe 1.6s ease-in-out infinite;
+  will-change: opacity;
 }
 
-@keyframes skeleton-loading {
-  0% {
-    background-position: 200% 0;
-  }
+@keyframes skeleton-breathe {
+  0%,
   100% {
-    background-position: -200% 0;
+    opacity: 0.78;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-highlight-fade {
+    animation: none;
+    background-color: rgba(251, 191, 36, 0.18);
+  }
+
+  .skeleton-pulse {
+    animation: none;
+    opacity: 1;
+  }
+
+  .psa-activity-mark-aura,
+  .psa-activity-mark-shell,
+  .psa-activity-mark-shell::before {
+    animation: none !important;
+    transition: none;
   }
 }

@@ -5,7 +5,15 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ..models import PaperRecord, PaperResult, SearchTrace
+from ..models import (
+    PaperRecord,
+    PaperResult,
+    ProjectChatMessage,
+    ProjectPaperSessionRecord,
+    ProjectRecord,
+    ProjectSearchThreadRecord,
+    SearchTrace,
+)
 
 
 class HealthJobSummary(BaseModel):
@@ -124,7 +132,54 @@ class PaperChatResponse(BaseModel):
     verifier: PaperChatVerifier | None = None
 
 
+class CreateProjectRequest(BaseModel):
+    title: str
+
+
+class UpdateProjectRequest(BaseModel):
+    title: str
+
+
+class ProjectSummaryResponse(BaseModel):
+    project_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    search_thread_count: int = 0
+    paper_session_count: int = 0
+
+
+class ProjectListResponse(BaseModel):
+    projects: list[ProjectSummaryResponse] = Field(default_factory=list)
+
+
+class ProjectDetailResponse(BaseModel):
+    project: ProjectSummaryResponse
+    threads: list[ProjectSearchThreadRecord] = Field(default_factory=list)
+    paper_sessions: list[ProjectPaperSessionRecord] = Field(default_factory=list)
+
+
+class ProjectMutationResponse(BaseModel):
+    project_id: str
+    status: Literal["cleared", "deleted"]
+
+
+class UpsertProjectThreadRequest(BaseModel):
+    query: str
+    trace_id: str | None = None
+    result_counts: dict[str, int] = Field(default_factory=dict)
+    paper_ids: list[str] = Field(default_factory=list)
+
+
+class UpsertProjectPaperSessionRequest(BaseModel):
+    paper_title: str | None = None
+    source_thread_id: str | None = None
+    chat_history: list[ProjectChatMessage] = Field(default_factory=list)
+    last_active_evidence_id: str | None = None
+
+
 __all__ = [
+    "CreateProjectRequest",
     "CreateSearchJobRequest",
     "HealthJobSummary",
     "HealthResponse",
@@ -134,10 +189,20 @@ __all__ = [
     "PaperChatRequest",
     "PaperChatResponse",
     "PaperChatVerifier",
+    "ProjectDetailResponse",
+    "ProjectListResponse",
+    "ProjectMutationResponse",
+    "ProjectSummaryResponse",
     "SearchJobProgressResponse",
     "PaperRecord",
+    "ProjectPaperSessionRecord",
+    "ProjectRecord",
+    "ProjectSearchThreadRecord",
     "SearchJobResultResponse",
     "SearchJobStatusResponse",
     "SearchResultCounts",
     "SearchTrace",
+    "UpdateProjectRequest",
+    "UpsertProjectPaperSessionRequest",
+    "UpsertProjectThreadRequest",
 ]

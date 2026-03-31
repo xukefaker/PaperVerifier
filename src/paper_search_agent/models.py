@@ -208,6 +208,56 @@ class PaperEnrichmentRecord(BaseModel):
     updated_at: str | None = None
 
 
+class ZoteroExportPayload(BaseModel):
+    paper_id: str
+    entry_type: str = "inproceedings"
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    authors_structured: list[StructuredAuthor] = Field(default_factory=list)
+    affiliations: list[str] = Field(default_factory=list)
+    abstract: str = ""
+    venue: str
+    year: int
+    track: str | None = None
+    doi: str | None = None
+    canonical_url: str | None = None
+    pdf_url: str | None = None
+    source: str = "acl_anthology"
+
+
+ViewerMode = Literal["manuscript", "pdf"]
+
+
+class ViewerMarkdownTarget(BaseModel):
+    block_id: str
+    section_block_id: str | None = None
+
+
+class ViewerPdfRect(BaseModel):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class ViewerPdfPageTarget(BaseModel):
+    page: int
+    width: float
+    height: float
+    bboxes: list[ViewerPdfRect] = Field(default_factory=list)
+
+
+class ViewerPdfTarget(BaseModel):
+    primary_page: int
+    pages: list[ViewerPdfPageTarget] = Field(default_factory=list)
+
+
+class EvidenceNavigationTarget(BaseModel):
+    evidence_id: str
+    markdown_target: ViewerMarkdownTarget | None = None
+    pdf_target: ViewerPdfTarget | None = None
+
+
 class StructuredRationale(BaseModel):
     main_reason: str | None = None
     matching_points: list[str] = Field(default_factory=list)
@@ -261,6 +311,49 @@ class SearchTrace(BaseModel):
     final_results: dict[str, list[PaperResult]] = Field(default_factory=dict)
     timings_ms: dict[str, float] = Field(default_factory=dict)
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
+
+
+class ProjectChatCitation(BaseModel):
+    evidence_id: str
+    page_start: int = 1
+    page_end: int = 1
+    section_path: list[str] = Field(default_factory=list)
+    snippet: str = ""
+
+
+class ProjectChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+    citations: list[ProjectChatCitation] = Field(default_factory=list)
+
+
+class ProjectRecord(BaseModel):
+    project_id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class ProjectSearchThreadRecord(BaseModel):
+    project_id: str
+    thread_id: str
+    query: str
+    trace_id: str | None = None
+    created_at: str
+    updated_at: str
+    result_counts: dict[str, int] = Field(default_factory=dict)
+    paper_ids: list[str] = Field(default_factory=list)
+
+
+class ProjectPaperSessionRecord(BaseModel):
+    project_id: str
+    paper_id: str
+    paper_title: str | None = None
+    source_thread_id: str | None = None
+    created_at: str
+    updated_at: str
+    chat_history: list[ProjectChatMessage] = Field(default_factory=list)
+    last_active_evidence_id: str | None = None
 
 
 class ParseFailureRecord(BaseModel):

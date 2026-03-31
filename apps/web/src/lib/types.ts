@@ -238,9 +238,42 @@ export type PaperViewerReference = {
   url?: string | null;
 };
 
+export type ViewerMode = 'manuscript' | 'pdf';
+
+export type EvidenceNavigationMarkdownTarget = {
+  block_id: string;
+  section_block_id?: string | null;
+};
+
+export type EvidenceNavigationPdfRect = {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+};
+
+export type EvidenceNavigationPdfPageTarget = {
+  page: number;
+  width: number;
+  height: number;
+  bboxes: EvidenceNavigationPdfRect[];
+};
+
+export type EvidenceNavigationPdfTarget = {
+  primary_page: number;
+  pages: EvidenceNavigationPdfPageTarget[];
+};
+
+export type EvidenceNavigationTarget = {
+  evidence_id: string;
+  markdown_target?: EvidenceNavigationMarkdownTarget | null;
+  pdf_target?: EvidenceNavigationPdfTarget | null;
+};
+
 export type PaperViewerResponse = {
   paper_id: string;
   title: string;
+  pdf_url?: string | null;
   display_header?: {
     authors_structured: {
       name: string;
@@ -249,7 +282,7 @@ export type PaperViewerResponse = {
     affiliations: string[];
   } | null;
   blocks: PaperViewerBlock[];
-  evidence_anchor_map: Record<string, string>;
+  evidence_navigation_map: Record<string, EvidenceNavigationTarget>;
   references?: PaperViewerReference[];
 };
 
@@ -288,4 +321,64 @@ export type SearchTrace = {
   final_results: Record<string, PaperResult[]>;
   timings_ms: Record<string, number>;
   token_usage: TokenUsage;
+};
+
+export type ProjectChatCitation = {
+  evidence_id: string;
+  page_start: number;
+  page_end: number;
+  section_path: string[];
+  snippet: string;
+};
+
+export type ProjectChatMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  citations: ProjectChatCitation[];
+};
+
+export type ProjectSearchThread = {
+  project_id: string;
+  thread_id: string;
+  query: string;
+  trace_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  result_counts: Record<string, number>;
+  paper_ids: string[];
+};
+
+export type ProjectPaperSession = {
+  project_id: string;
+  paper_id: string;
+  paper_title?: string | null;
+  source_thread_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  chat_history: ProjectChatMessage[];
+  last_active_evidence_id?: string | null;
+};
+
+export type ProjectSummary = {
+  project_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  search_thread_count: number;
+  paper_session_count: number;
+};
+
+export type ProjectListResponse = {
+  projects: ProjectSummary[];
+};
+
+export type ProjectDetailResponse = {
+  project: ProjectSummary;
+  threads: ProjectSearchThread[];
+  paper_sessions: ProjectPaperSession[];
+};
+
+export type ProjectMutationResponse = {
+  project_id: string;
+  status: 'cleared' | 'deleted';
 };

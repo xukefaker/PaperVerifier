@@ -1,15 +1,12 @@
+import { paperZoteroPageUrl } from '@/lib/client-api';
 import type { PaperResult } from '@/lib/types';
 import { motion } from 'framer-motion';
-import { ArrowRight, ImageIcon, Landmark, Users } from 'lucide-react';
+import { ArrowRight, BookMarked, ImageIcon, Landmark, Users } from 'lucide-react';
 
 type PaperResultCardProps = {
   paper: PaperResult;
   onOpenPaper: (paper: PaperResult) => void;
   onQuickPeek?: (paper: PaperResult) => void;
-};
-
-type PaperResultCardSkeletonProps = {
-  variant?: 'tall' | 'balanced' | 'compact';
 };
 
 export function PaperResultCard({ paper, onOpenPaper, onQuickPeek }: PaperResultCardProps) {
@@ -105,7 +102,7 @@ export function PaperResultCard({ paper, onOpenPaper, onQuickPeek }: PaperResult
         </div>
 
         <div className='mt-auto border-t border-slate-100/90 pt-5'>
-          <div>
+          <div className='grid gap-3'>
             <button
               type='button'
               onClick={(event) => {
@@ -117,6 +114,18 @@ export function PaperResultCard({ paper, onOpenPaper, onQuickPeek }: PaperResult
               <span>Explore manuscript</span>
               <ArrowRight className='h-4 w-4 transition-transform group-hover:translate-x-1' />
             </button>
+            <a
+              href={paperZoteroPageUrl(paper.paper_id)}
+              target='_blank'
+              rel='noreferrer'
+              onClick={(event) => {
+                event.stopPropagation();
+              }}
+              className='inline-flex w-full items-center justify-between gap-3 rounded-[1.4rem] border border-slate-200 bg-slate-50/80 px-5 py-3.5 text-[0.76rem] font-bold uppercase tracking-[0.22em] text-slate-700 transition-all hover:border-indigo-200 hover:bg-white hover:text-indigo-600 active:scale-[0.99]'
+            >
+              <span>Save to Zotero</span>
+              <BookMarked className='h-4 w-4' />
+            </a>
           </div>
         </div>
       </div>
@@ -124,19 +133,10 @@ export function PaperResultCard({ paper, onOpenPaper, onQuickPeek }: PaperResult
   );
 }
 
-export function PaperResultCardSkeleton({ variant = 'balanced' }: PaperResultCardSkeletonProps) {
-  const titleWidths =
-    variant === 'tall'
-      ? ['w-[88%]', 'w-[74%]', 'w-[62%]']
-      : variant === 'compact'
-        ? ['w-[82%]', 'w-[70%]', 'w-[48%]']
-        : ['w-[90%]', 'w-[78%]', 'w-[56%]'];
-  const imageHeightClass = variant === 'tall' ? 'h-60' : variant === 'compact' ? 'h-48' : 'h-56';
-  const bodySpacerClass = variant === 'tall' ? 'min-h-[6.4rem]' : variant === 'compact' ? 'min-h-[4.8rem]' : 'min-h-[5.4rem]';
-
+export function PaperResultCardSkeleton() {
   return (
-    <article className='skeleton-card-sheen relative flex h-full min-h-[37rem] flex-col overflow-hidden rounded-[2rem] border border-white/85 bg-white/88 shadow-scholar-lg backdrop-blur-xl'>
-      <div className={`relative ${imageHeightClass} overflow-hidden border-b border-slate-100/90 bg-[linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)]`}>
+    <article className='skeleton-card-sheen relative flex h-full min-h-[37rem] flex-col overflow-hidden rounded-[2rem] border border-white/85 bg-white/92 shadow-[0_18px_40px_rgba(15,23,42,0.06)]'>
+      <div className='relative h-56 overflow-hidden border-b border-slate-100/90 bg-[linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)]'>
         <div className='absolute inset-x-5 top-5 flex items-center justify-between'>
           <div className='skeleton-pulse h-7 w-28 rounded-full' />
           <div className='skeleton-pulse h-7 w-20 rounded-full' />
@@ -151,12 +151,12 @@ export function PaperResultCardSkeleton({ variant = 'balanced' }: PaperResultCar
         </div>
 
         <div className='mb-4 space-y-3'>
-          {titleWidths.map((width) => (
+          {['w-[88%]', 'w-[76%]', 'w-[58%]'].map((width) => (
             <div key={width} className={`skeleton-pulse h-4 rounded-full ${width}`} />
           ))}
         </div>
 
-        <div className={`mb-7 space-y-3 ${bodySpacerClass}`}>
+        <div className='mb-7 min-h-[5.6rem] space-y-3'>
           <div className='flex items-start gap-2.5'>
             <div className='skeleton-pulse mt-1 h-4 w-4 rounded-full' />
             <div className='flex-1 space-y-2'>
