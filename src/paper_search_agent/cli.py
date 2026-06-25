@@ -321,6 +321,27 @@ def web(
     raise typer.Exit(code=_run_until_exit([api_process, web_process]))
 
 
+@app.command("demo-acl")
+def demo_acl(
+    max_papers: int = typer.Option(100, "--max-papers", min=1, help="Number of ACL papers to download."),
+    year: int = typer.Option(2025, "--year", help="ACL event year."),
+    track: str = typer.Option("long", "--track", help="ACL track to sample, for example long or short."),
+) -> None:
+    corpus_track = _corpus_track([track])
+    settings, store = _components_for_corpus(venue="acl", year=year, track=corpus_track)
+    summary = ACLAnthologyIngestor(settings, store).ingest_event(
+        venue="acl",
+        year=year,
+        tracks=[track],
+        max_papers=max_papers,
+        download_pdfs=True,
+    )
+    _write_search_current_scope([settings.corpus])
+    typer.echo(summary.model_dump_json(indent=2))
+    typer.echo(f"Downloaded PDFs are under {settings.pdf_dir / 'acl' / str(year) / corpus_track}")
+    typer.echo("Next: run `paper-search-agent index`, then `paper-search-agent web`.")
+
+
 @app.command("ingest-acl", hidden=True)
 def ingest_acl(
     venue: str = typer.Option(..., "--venue"),

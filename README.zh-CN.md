@@ -33,6 +33,16 @@ paper-search-agent web
 
 然后打开 `http://127.0.0.1:4000`。
 
+## 体验示例论文
+
+暂时没有自己的 PDF？可以下载 100 篇 ACL 2025 long track 论文：
+
+```bash
+paper-search-agent demo-acl --max-papers 100
+paper-search-agent index
+paper-search-agent web
+```
+
 ## 说明
 
 - PDF 和索引默认保存在 `data/`。

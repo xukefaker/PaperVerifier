@@ -33,6 +33,16 @@ paper-search-agent web
 
 Open `http://127.0.0.1:4000`.
 
+## Try Demo Papers
+
+No PDFs yet? Download 100 ACL 2025 long papers:
+
+```bash
+paper-search-agent demo-acl --max-papers 100
+paper-search-agent index
+paper-search-agent web
+```
+
 ## Notes
 
 - PDFs and indexes stay under `data/` by default.
