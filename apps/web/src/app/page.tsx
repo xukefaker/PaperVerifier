@@ -411,7 +411,7 @@ function SearchSuggestionPanel({
     }`}>
       <div className='mb-3 flex items-center justify-between gap-3'>
         <div className='text-[0.68rem] font-bold uppercase tracking-[0.22em] text-slate-400'>Query suggestions</div>
-        <div className='text-[0.68rem] font-medium text-slate-400'>Click to draft, then edit freely</div>
+        <div className='text-[0.68rem] font-medium text-slate-400'>Click to search</div>
       </div>
 
       <div className={`grid gap-3 ${compact ? 'lg:grid-cols-2' : 'md:grid-cols-2'}`}>
@@ -1761,7 +1761,8 @@ export default function ChatPage() {
                 variant={variant}
                 onSelect={(query) => {
                   setInput(query);
-                  composerTextareaRef.current?.focus();
+                  setIsComposerFocused(false);
+                  void handleSearch(query);
                 }}
               />
             </div>
