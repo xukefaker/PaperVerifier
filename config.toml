@@ -59,7 +59,7 @@ device = ""
 batch_size = 8
 
 [openai]
-enabled = false
+enabled = true
 base_url = "https://api.openai.com/v1"
 model = "gpt-5.4-mini"
 request_timeout = 60.0
