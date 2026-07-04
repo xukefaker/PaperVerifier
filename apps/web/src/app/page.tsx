@@ -1366,7 +1366,7 @@ export default function ChatPage() {
 
   const handleSearch = useCallback(async (query: string) => {
     const normalizedQuery = query.trim();
-    if (!normalizedQuery || searchInFlightRef.current || projectState === 'loading' || searchBlockedReason) {
+    if (!normalizedQuery || searchInFlightRef.current || searchBlockedReason) {
       return;
     }
     searchInFlightRef.current = true;
@@ -1514,7 +1514,7 @@ export default function ChatPage() {
       setIsSearching(false);
       activeSearchSnapshotRef.current = 'none';
     }
-  }, [ensureWorkspaceForSearch, persistProjectThread, projectState, searchBlockedReason]);
+  }, [ensureWorkspaceForSearch, persistProjectThread, searchBlockedReason]);
 
   const handleToggleTrace = useCallback(async (messageId: string) => {
     const message = messages.find((item) => item.id === messageId);
