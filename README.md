@@ -1,25 +1,26 @@
-# PaperVerifier
+# ChemVerify
 
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
 ![uv](https://img.shields.io/badge/env-uv-4B32C3)
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
 
-Local evidence-verified paper search for your PDF library.
+ChemVerify is a local evidence-verified chemistry paper search system for PDF libraries.
 
-Drop PDFs into a folder, build an evidence-aware local index, then ask questions from the web UI.
+Put PDFs in a folder, build a local index, then search and read papers through a web interface with cited evidence.
 
-- Bring your own PDFs.
-- Parse paper text, sections, figures, and tables.
-- Search and ask with cited evidence.
+## Requirements
+
+- `uv`
+- Node.js 20 or newer
+- An OpenAI-compatible API key
+- CUDA or Apple MPS is optional. CPU works, but indexing is slower.
 
 ## Quick Start
 
-Requirements: `uv`, Node.js 20+, and an OpenAI-compatible API key.
-
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-git clone https://github.com/xukefaker/PaperVerifier.git
-cd PaperVerifier
+git clone https://github.com/xukefaker/ChemVerify.git
+cd ChemVerify
 ./scripts/install.sh
 ```
 
@@ -29,15 +30,15 @@ Edit `.env`:
 OPENAI_API_KEY=sk-...
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
-PAPERVERIFIER_DEVICE=auto
+CHEMVERIFY_DEVICE=auto
 ```
 
-Try a small ACL demo:
+Run a small chemistry demo:
 
 ```bash
-./paperverifier demo-acl --max-papers 5
-./paperverifier index
-./paperverifier web
+./chemverify demo-chem --max-papers 5
+./chemverify index
+./chemverify web
 ```
 
 Open `http://127.0.0.1:4000`.
@@ -49,8 +50,8 @@ Install `uv`, clone the repo, then run the installer:
 
 ```powershell
 winget install --id=astral-sh.uv -e
-git clone https://github.com/xukefaker/PaperVerifier.git
-cd PaperVerifier
+git clone https://github.com/xukefaker/ChemVerify.git
+cd ChemVerify
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
@@ -63,9 +64,9 @@ notepad .env
 Run the demo:
 
 ```powershell
-.\paperverifier.cmd demo-acl --max-papers 5
-.\paperverifier.cmd index
-.\paperverifier.cmd web
+.\chemverify.cmd demo-chem --max-papers 5
+.\chemverify.cmd index
+.\chemverify.cmd web
 ```
 
 Open `http://127.0.0.1:4000`.
@@ -78,18 +79,16 @@ Open `http://127.0.0.1:4000`.
 mkdir -p pdfs
 # Put PDFs in ./pdfs
 
-./paperverifier add-pdfs ./pdfs
-./paperverifier index
-./paperverifier web
+./chemverify add-pdfs ./pdfs
+./chemverify index
+./chemverify web
 ```
 
-During indexing, press `q` to cancel. PaperVerifier removes staged files from that run and keeps the previous working index.
-
-MinerU PDF parsing is the slowest step. PaperVerifier shows real paper-level progress: the current PDF, page count, elapsed time, and completed paper count. If you press `q` while MinerU is inside one PDF, PaperVerifier finishes that PDF first, then stops and removes staged files from the run.
+During indexing, press `q` to cancel. ChemVerify removes staged files from that run and keeps the previous working index.
 
 ## Configuration
 
-The installer creates `.venv/`, installs PaperVerifier with an automatically selected PyTorch backend, creates `.env`, and runs the doctor check.
+The installer creates `.venv/`, installs ChemVerify with an automatically selected PyTorch backend, creates `.env`, and runs `chemverify doctor`.
 
 The only required setting is:
 
@@ -102,20 +101,20 @@ Useful defaults:
 ```env
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
-PAPERVERIFIER_DATA_DIR=./data
-PAPERVERIFIER_DEVICE=auto
-PAPERVERIFIER_APP_NAME=PaperVerifier
+CHEMVERIFY_DATA_DIR=./data
+CHEMVERIFY_DEVICE=auto
+CHEMVERIFY_APP_NAME=ChemVerify
 ```
 
-`PAPERVERIFIER_DEVICE=auto` prefers CUDA or Apple MPS when PyTorch can use it. If no accelerator is available, PaperVerifier warns and continues on CPU.
+`CHEMVERIFY_DEVICE=auto` prefers CUDA or Apple MPS when PyTorch can use it. If no accelerator is available, ChemVerify warns and continues on CPU.
 
 ## Troubleshooting
 
 ```bash
-./paperverifier doctor
+./chemverify doctor
 ```
 
-- `CUDA available=False`: your Python environment cannot use CUDA. CPU still works, but indexing is slower.
-- `demo-acl` PDF download timeout: ACL Anthology is unreachable from your network. Retry later, use a VPN/proxy, or skip the demo and run `./paperverifier add-pdfs ./pdfs` with your own PDFs.
-- PowerShell blocks scripts: use the installer command shown in the Windows section; its bypass applies only to that command.
+- `CUDA available=False`: CPU still works, but indexing is slower. If you expected an NVIDIA GPU, reinstall after checking your driver.
+- `OPENAI_API_KEY=missing`: edit `.env` and set your key.
+- PowerShell blocks scripts: use the installer command shown in the Windows section. Its bypass applies only to that command.
 - First `web` run is slow: frontend dependencies are installed under `apps/web/node_modules/`.

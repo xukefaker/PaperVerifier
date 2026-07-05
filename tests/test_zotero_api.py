@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from paperscout.config import Settings
+from chemverify.config import Settings
 
 
 class _NoopSearchEngine:
@@ -86,10 +86,10 @@ model = "gpt-5.4-mini"
 """,
         encoding="utf-8",
     )
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(tmp_path / "data"))
     _write_search_current_snapshot(tmp_path, build_id="build-zotero")
 
-    app_module = importlib.import_module("paperscout.api.app")
+    app_module = importlib.import_module("chemverify.api.app")
     monkeypatch.setattr(app_module, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(app_module, "SearchEngine", _NoopSearchEngine)
     monkeypatch.setattr(app_module, "DeepChatService", _NoopDeepChatService)

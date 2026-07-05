@@ -77,7 +77,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "openai": {
         "enabled": True,
         "base_url": "https://api.openai.com/v1",
-        "model": "gpt-5.4-mini",
+        "model": "gpt-4o-mini",
         "request_timeout": 60.0,
         "input_price_per_1m": None,
         "output_price_per_1m": None,
@@ -223,12 +223,12 @@ class Settings:
             user_payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
             _deep_update(config_payload, user_payload)
 
-        device = _as_optional_str(_env_value("PAPERSCOUT_DEVICE"))
-        data_dir_override = _env_value("PAPERSCOUT_DATA_DIR")
+        device = _as_optional_str(_env_value("CHEMVERIFY_DEVICE"))
+        data_dir_override = _env_value("CHEMVERIFY_DATA_DIR")
         data_dir = _resolve_dir(
             base_dir,
             _env_or_config(
-                env_name="PAPERSCOUT_DATA_DIR",
+                env_name="CHEMVERIFY_DATA_DIR",
                 payload=config_payload,
                 path=("data", "data_dir"),
             ),
@@ -256,12 +256,12 @@ class Settings:
         deep_chat_index_dir = current_release_path / "indexes" / "deep_chat"
         mineru_output_dir = _resolve_dir(
             base_dir,
-            _env_value("PAPERSCOUT_MINERU_OUTPUT_DIR")
+            _env_value("CHEMVERIFY_MINERU_OUTPUT_DIR")
             or (
                 str(data_dir / "parsed" / "mineru")
                 if data_dir_override is not None
                 else _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_OUTPUT_DIR",
+                    env_name="CHEMVERIFY_MINERU_OUTPUT_DIR",
                     payload=config_payload,
                     path=("mineru", "output_dir"),
                 )
@@ -298,72 +298,72 @@ class Settings:
             trace_dir=trace_dir,
             public_api_base_url=_as_optional_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_PUBLIC_API_BASE_URL",
+                    env_name="CHEMVERIFY_PUBLIC_API_BASE_URL",
                     payload=config_payload,
                     path=("service", "public_api_base_url"),
                 )
             ),
             pdf_parser_backend=_as_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_PDF_PARSER_BACKEND",
+                    env_name="CHEMVERIFY_PDF_PARSER_BACKEND",
                     payload=config_payload,
                     path=("pdf_parser", "backend"),
                 )
             ),
             mineru_command=_as_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_COMMAND",
+                    env_name="CHEMVERIFY_MINERU_COMMAND",
                     payload=config_payload,
                     path=("mineru", "command"),
                 )
             ),
             mineru_backend=_as_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_BACKEND",
+                    env_name="CHEMVERIFY_MINERU_BACKEND",
                     payload=config_payload,
                     path=("mineru", "backend"),
                 )
             ),
             mineru_method=_as_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_METHOD",
+                    env_name="CHEMVERIFY_MINERU_METHOD",
                     payload=config_payload,
                     path=("mineru", "method"),
                 )
             ),
             mineru_lang=_as_optional_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_LANG",
+                    env_name="CHEMVERIFY_MINERU_LANG",
                     payload=config_payload,
                     path=("mineru", "lang"),
                 )
             ),
             mineru_source=_as_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_SOURCE",
+                    env_name="CHEMVERIFY_MINERU_SOURCE",
                     payload=config_payload,
                     path=("mineru", "source"),
                 )
             ),
             mineru_device=_as_optional_str(
-                _env_value("PAPERSCOUT_MINERU_DEVICE")
+                _env_value("CHEMVERIFY_MINERU_DEVICE")
                 or device
                 or _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_DEVICE",
+                    env_name="CHEMVERIFY_MINERU_DEVICE",
                     payload=config_payload,
                     path=("mineru", "device"),
                 )
             ),
             mineru_formula=_as_bool(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_FORMULA",
+                    env_name="CHEMVERIFY_MINERU_FORMULA",
                     payload=config_payload,
                     path=("mineru", "formula"),
                 )
             ),
             mineru_table=_as_bool(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_TABLE",
+                    env_name="CHEMVERIFY_MINERU_TABLE",
                     payload=config_payload,
                     path=("mineru", "table"),
                 )
@@ -371,21 +371,21 @@ class Settings:
             mineru_output_dir=mineru_output_dir,
             mineru_require_middle_json=_as_bool(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_REQUIRE_MIDDLE_JSON",
+                    env_name="CHEMVERIFY_MINERU_REQUIRE_MIDDLE_JSON",
                     payload=config_payload,
                     path=("mineru", "require_middle_json"),
                 )
             ),
             mineru_require_markdown=_as_bool(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_REQUIRE_MARKDOWN",
+                    env_name="CHEMVERIFY_MINERU_REQUIRE_MARKDOWN",
                     payload=config_payload,
                     path=("mineru", "require_markdown"),
                 )
             ),
             mineru_timeout_seconds=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_MINERU_TIMEOUT_SECONDS",
+                    env_name="CHEMVERIFY_MINERU_TIMEOUT_SECONDS",
                     payload=config_payload,
                     path=("mineru", "timeout_seconds"),
                 )
@@ -407,284 +407,284 @@ class Settings:
             ),
             openai_enabled=_as_bool(
                 _env_or_config(
-                    env_name="PAPERSCOUT_OPENAI_ENABLED",
+                    env_name="CHEMVERIFY_OPENAI_ENABLED",
                     payload=config_payload,
                     path=("openai", "enabled"),
                 )
             ),
             grobid_enabled=_as_bool(
                 _env_or_config(
-                    env_name="PAPERSCOUT_GROBID_ENABLED",
+                    env_name="CHEMVERIFY_GROBID_ENABLED",
                     payload=config_payload,
                     path=("grobid", "enabled"),
                 )
             ),
             grobid_base_url=_as_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_GROBID_BASE_URL",
+                    env_name="CHEMVERIFY_GROBID_BASE_URL",
                     payload=config_payload,
                     path=("grobid", "base_url"),
                 )
             ).rstrip("/"),
             grobid_timeout_seconds=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_GROBID_TIMEOUT_SECONDS",
+                    env_name="CHEMVERIFY_GROBID_TIMEOUT_SECONDS",
                     payload=config_payload,
                     path=("grobid", "timeout_seconds"),
                 )
             ),
             paper_dense_model=_as_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_PAPER_DENSE_MODEL",
+                    env_name="CHEMVERIFY_PAPER_DENSE_MODEL",
                     payload=config_payload,
                     path=("indexing", "paper_dense_model"),
                 )
             ),
             chunk_dense_model=_as_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_CHUNK_DENSE_MODEL",
+                    env_name="CHEMVERIFY_CHUNK_DENSE_MODEL",
                     payload=config_payload,
                     path=("indexing", "chunk_dense_model"),
                 )
             ),
             chunk_target_tokens=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_CHUNK_TARGET_TOKENS",
+                    env_name="CHEMVERIFY_CHUNK_TARGET_TOKENS",
                     payload=config_payload,
                     path=("indexing", "chunk_target_tokens"),
                 )
             ),
             chunk_overlap_tokens=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_CHUNK_OVERLAP_TOKENS",
+                    env_name="CHEMVERIFY_CHUNK_OVERLAP_TOKENS",
                     payload=config_payload,
                     path=("indexing", "chunk_overlap_tokens"),
                 )
             ),
             candidate_pool_size=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_CANDIDATE_POOL_SIZE",
+                    env_name="CHEMVERIFY_CANDIDATE_POOL_SIZE",
                     payload=config_payload,
                     path=("retrieval", "candidate_pool_size"),
                 )
             ),
             verifier_candidate_limit=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_VERIFIER_CANDIDATE_LIMIT",
+                    env_name="CHEMVERIFY_VERIFIER_CANDIDATE_LIMIT",
                     payload=config_payload,
                     path=("retrieval", "verifier_candidate_limit"),
                 )
             ),
             candidate_source_limit=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_CANDIDATE_SOURCE_LIMIT",
+                    env_name="CHEMVERIFY_CANDIDATE_SOURCE_LIMIT",
                     payload=config_payload,
                     path=("retrieval", "candidate_source_limit"),
                 )
             ),
             default_top_k=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_DEFAULT_TOP_K",
+                    env_name="CHEMVERIFY_DEFAULT_TOP_K",
                     payload=config_payload,
                     path=("retrieval", "default_top_k"),
                 )
             ),
             paper_sparse_rrf_weight=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_PAPER_SPARSE_RRF_WEIGHT",
+                    env_name="CHEMVERIFY_PAPER_SPARSE_RRF_WEIGHT",
                     payload=config_payload,
                     path=("retrieval", "paper_sparse_rrf_weight"),
                 )
             ),
             paper_dense_rrf_weight=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_PAPER_DENSE_RRF_WEIGHT",
+                    env_name="CHEMVERIFY_PAPER_DENSE_RRF_WEIGHT",
                     payload=config_payload,
                     path=("retrieval", "paper_dense_rrf_weight"),
                 )
             ),
             chunk_aggregated_rrf_weight=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_CHUNK_AGGREGATED_RRF_WEIGHT",
+                    env_name="CHEMVERIFY_CHUNK_AGGREGATED_RRF_WEIGHT",
                     payload=config_payload,
                     path=("retrieval", "chunk_aggregated_rrf_weight"),
                 )
             ),
             literal_entity_rrf_weight=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_LITERAL_ENTITY_RRF_WEIGHT",
+                    env_name="CHEMVERIFY_LITERAL_ENTITY_RRF_WEIGHT",
                     payload=config_payload,
                     path=("retrieval", "literal_entity_rrf_weight"),
                 )
             ),
             exact_phrase_rrf_weight=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_EXACT_PHRASE_RRF_WEIGHT",
+                    env_name="CHEMVERIFY_EXACT_PHRASE_RRF_WEIGHT",
                     payload=config_payload,
                     path=("retrieval", "exact_phrase_rrf_weight"),
                 )
             ),
             aspect_coverage_bonus=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_ASPECT_COVERAGE_BONUS",
+                    env_name="CHEMVERIFY_ASPECT_COVERAGE_BONUS",
                     payload=config_payload,
                     path=("retrieval", "aspect_coverage_bonus"),
                 )
             ),
             source_diversity_bonus=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_SOURCE_DIVERSITY_BONUS",
+                    env_name="CHEMVERIFY_SOURCE_DIVERSITY_BONUS",
                     payload=config_payload,
                     path=("retrieval", "source_diversity_bonus"),
                 )
             ),
             literal_entity_bonus=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_LITERAL_ENTITY_BONUS",
+                    env_name="CHEMVERIFY_LITERAL_ENTITY_BONUS",
                     payload=config_payload,
                     path=("retrieval", "literal_entity_bonus"),
                 )
             ),
             exact_phrase_bonus=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_EXACT_PHRASE_BONUS",
+                    env_name="CHEMVERIFY_EXACT_PHRASE_BONUS",
                     payload=config_payload,
                     path=("retrieval", "exact_phrase_bonus"),
                 )
             ),
             evidence_sparse_weight=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_EVIDENCE_SPARSE_WEIGHT",
+                    env_name="CHEMVERIFY_EVIDENCE_SPARSE_WEIGHT",
                     payload=config_payload,
                     path=("retrieval", "evidence_sparse_weight"),
                 )
             ),
             evidence_dense_weight=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_EVIDENCE_DENSE_WEIGHT",
+                    env_name="CHEMVERIFY_EVIDENCE_DENSE_WEIGHT",
                     payload=config_payload,
                     path=("retrieval", "evidence_dense_weight"),
                 )
             ),
             evidence_reranker_weight=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_EVIDENCE_RERANKER_WEIGHT",
+                    env_name="CHEMVERIFY_EVIDENCE_RERANKER_WEIGHT",
                     payload=config_payload,
                     path=("retrieval", "evidence_reranker_weight"),
                 )
             ),
             evidence_reranker_candidate_chunks=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_EVIDENCE_RERANKER_CANDIDATE_CHUNKS",
+                    env_name="CHEMVERIFY_EVIDENCE_RERANKER_CANDIDATE_CHUNKS",
                     payload=config_payload,
                     path=("retrieval", "evidence_reranker_candidate_chunks"),
                 )
             ),
             verifier_max_workers=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_VERIFIER_MAX_WORKERS",
+                    env_name="CHEMVERIFY_VERIFIER_MAX_WORKERS",
                     payload=config_payload,
                     path=("retrieval", "verifier_max_workers"),
                 )
             ),
             evidence_chunk_text_limit=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_EVIDENCE_CHUNK_TEXT_LIMIT",
+                    env_name="CHEMVERIFY_EVIDENCE_CHUNK_TEXT_LIMIT",
                     payload=config_payload,
                     path=("retrieval", "evidence_chunk_text_limit"),
                 )
             ),
             reranker_model=_as_str(
                 _env_or_config(
-                    env_name="PAPERSCOUT_RERANKER_MODEL",
+                    env_name="CHEMVERIFY_RERANKER_MODEL",
                     payload=config_payload,
                     path=("reranker", "model"),
                 )
             ),
             reranker_device=_as_optional_str(
-                _env_value("PAPERSCOUT_RERANKER_DEVICE")
+                _env_value("CHEMVERIFY_RERANKER_DEVICE")
                 or device
                 or _env_or_config(
-                    env_name="PAPERSCOUT_RERANKER_DEVICE",
+                    env_name="CHEMVERIFY_RERANKER_DEVICE",
                     payload=config_payload,
                     path=("reranker", "device"),
                 )
             ),
             reranker_batch_size=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_RERANKER_BATCH_SIZE",
+                    env_name="CHEMVERIFY_RERANKER_BATCH_SIZE",
                     payload=config_payload,
                     path=("reranker", "batch_size"),
                 )
             ),
             deep_chat_history_turn_limit=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_DEEP_CHAT_HISTORY_TURN_LIMIT",
+                    env_name="CHEMVERIFY_DEEP_CHAT_HISTORY_TURN_LIMIT",
                     payload=config_payload,
                     path=("deep_chat", "history_turn_limit"),
                 )
             ),
             deep_chat_global_evidence_k=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_DEEP_CHAT_GLOBAL_EVIDENCE_K",
+                    env_name="CHEMVERIFY_DEEP_CHAT_GLOBAL_EVIDENCE_K",
                     payload=config_payload,
                     path=("deep_chat", "global_evidence_k"),
                 )
             ),
             deep_chat_local_evidence_k=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_DEEP_CHAT_LOCAL_EVIDENCE_K",
+                    env_name="CHEMVERIFY_DEEP_CHAT_LOCAL_EVIDENCE_K",
                     payload=config_payload,
                     path=("deep_chat", "local_evidence_k"),
                 )
             ),
             deep_chat_retrieval_candidate_k=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_DEEP_CHAT_RETRIEVAL_CANDIDATE_K",
+                    env_name="CHEMVERIFY_DEEP_CHAT_RETRIEVAL_CANDIDATE_K",
                     payload=config_payload,
                     path=("deep_chat", "retrieval_candidate_k"),
                 )
             ),
             deep_chat_max_evidence_text_chars=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_DEEP_CHAT_MAX_EVIDENCE_TEXT_CHARS",
+                    env_name="CHEMVERIFY_DEEP_CHAT_MAX_EVIDENCE_TEXT_CHARS",
                     payload=config_payload,
                     path=("deep_chat", "max_evidence_text_chars"),
                 )
             ),
             request_timeout=_as_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_REQUEST_TIMEOUT",
+                    env_name="CHEMVERIFY_REQUEST_TIMEOUT",
                     payload=config_payload,
                     path=("openai", "request_timeout"),
                 )
             ),
             dense_device=_as_optional_str(
-                _env_value("PAPERSCOUT_DENSE_DEVICE")
+                _env_value("CHEMVERIFY_DENSE_DEVICE")
                 or device
                 or _env_or_config(
-                    env_name="PAPERSCOUT_DENSE_DEVICE",
+                    env_name="CHEMVERIFY_DENSE_DEVICE",
                     payload=config_payload,
                     path=("indexing", "dense_device"),
                 )
             ),
             dense_batch_size=_as_int(
                 _env_or_config(
-                    env_name="PAPERSCOUT_DENSE_BATCH_SIZE",
+                    env_name="CHEMVERIFY_DENSE_BATCH_SIZE",
                     payload=config_payload,
                     path=("indexing", "dense_batch_size"),
                 )
             ),
             input_price_per_1m=_as_optional_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_INPUT_PRICE_PER_1M",
+                    env_name="CHEMVERIFY_INPUT_PRICE_PER_1M",
                     payload=config_payload,
                     path=("openai", "input_price_per_1m"),
                 )
             ),
             output_price_per_1m=_as_optional_float(
                 _env_or_config(
-                    env_name="PAPERSCOUT_OUTPUT_PRICE_PER_1M",
+                    env_name="CHEMVERIFY_OUTPUT_PRICE_PER_1M",
                     payload=config_payload,
                     path=("openai", "output_price_per_1m"),
                 )
@@ -753,11 +753,6 @@ def _env_or_config(*, env_name: str, payload: dict[str, Any], path: tuple[str, .
 
 
 def _env_value(env_name: str) -> str | None:
-    if env_name.startswith("PAPERSCOUT_"):
-        public_name = "PAPERVERIFIER_" + env_name.removeprefix("PAPERSCOUT_")
-        public_value = os.getenv(public_name)
-        if public_value not in (None, ""):
-            return public_value
     return os.getenv(env_name)
 
 
@@ -772,9 +767,9 @@ def _resolve_corpus(*, base_dir: Path, data_dir: Path, explicit: CorpusSpec | No
     if explicit is not None:
         return explicit
 
-    env_venue = _env_value("PAPERSCOUT_VENUE")
-    env_year = _env_value("PAPERSCOUT_YEAR")
-    env_track = _env_value("PAPERSCOUT_TRACK")
+    env_venue = _env_value("CHEMVERIFY_VENUE")
+    env_year = _env_value("CHEMVERIFY_YEAR")
+    env_track = _env_value("CHEMVERIFY_TRACK")
     if any(value not in (None, "") for value in (env_venue, env_year, env_track)):
         return CorpusSpec.from_values(env_venue, int(env_year) if env_year not in (None, "") else None, env_track)
 

@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
-Write-Host "PaperVerifier installer" -ForegroundColor Cyan
+Write-Host "ChemVerify installer" -ForegroundColor Cyan
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   Write-Host "uv is required. Install it first:" -ForegroundColor Red
@@ -18,11 +18,11 @@ $env:VIRTUAL_ENV = Join-Path $Root ".venv"
 $env:PATH = (Join-Path $env:VIRTUAL_ENV "Scripts") + ";" + $env:PATH
 
 uv pip install -e . --torch-backend=auto
-& "$Root\paperverifier.cmd" init
-& "$Root\paperverifier.cmd" doctor
+& "$Root\chemverify.cmd" init
+& "$Root\chemverify.cmd" doctor
 
 Write-Host ""
 Write-Host "Done. Edit .env, then run:" -ForegroundColor Green
-Write-Host ".\paperverifier.cmd demo-acl --max-papers 20"
-Write-Host ".\paperverifier.cmd index"
-Write-Host ".\paperverifier.cmd web"
+Write-Host ".\chemverify.cmd demo-chem --max-papers 5"
+Write-Host ".\chemverify.cmd index"
+Write-Host ".\chemverify.cmd web"

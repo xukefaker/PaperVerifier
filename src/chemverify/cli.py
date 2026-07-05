@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -31,12 +32,79 @@ from .runtime import resolve_project_root
 from .search_current import rebuild_search_current
 from .storage import LocalStore
 from .terminal_logging import configure_terminal_logging
-from .utils import now_iso
+from .utils import extract_keywords, now_iso
 
 configure_terminal_logging()
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, pretty_exceptions_show_locals=False)
 PROJECT_ROOT = resolve_project_root()
+
+CHEM_DEMO_PAPERS = [
+    {
+        "paper_id": "chem-demo-01",
+        "title": "Sunlight-driven simultaneous CO2 reduction and water oxidation using indium-organic framework heterostructures",
+        "year": 2025,
+        "url": "https://www.nature.com/articles/s41467-025-57742-5",
+        "pdf_url": "https://www.nature.com/articles/s41467-025-57742-5.pdf",
+        "abstract": "Open-access chemistry paper on artificial photosynthesis, CO2 reduction, water oxidation, and indium-organic framework heterostructures.",
+    },
+    {
+        "paper_id": "chem-demo-02",
+        "title": "Post-synthetic modification of covalent organic frameworks for CO2 electroreduction",
+        "year": 2023,
+        "url": "https://www.nature.com/articles/s41467-023-39544-9",
+        "pdf_url": "https://www.nature.com/articles/s41467-023-39544-9.pdf",
+        "abstract": "Open-access chemistry paper on covalent organic frameworks, catalytic sites, and CO2 electroreduction.",
+    },
+    {
+        "paper_id": "chem-demo-03",
+        "title": "Linkage-engineered donor-acceptor covalent organic frameworks for optimal photosynthesis of hydrogen peroxide from water and air",
+        "year": 2023,
+        "url": "https://www.nature.com/articles/s41929-023-01102-3",
+        "pdf_url": "https://www.nature.com/articles/s41929-023-01102-3.pdf",
+        "abstract": "Open-access chemistry paper on donor-acceptor covalent organic frameworks, charge transfer, mass transport, and photocatalytic hydrogen peroxide production.",
+    },
+    {
+        "paper_id": "chem-demo-04",
+        "title": "Linking oxidative and reductive clusters to prepare crystalline porous catalysts for photocatalytic CO2 reduction with H2O",
+        "year": 2022,
+        "url": "https://www.nature.com/articles/s41467-022-32449-z",
+        "pdf_url": "https://www.nature.com/articles/s41467-022-32449-z.pdf",
+        "abstract": "Open-access chemistry paper on crystalline porous catalysts, photocatalytic CO2 reduction, and water as the oxidation source.",
+    },
+    {
+        "paper_id": "chem-demo-05",
+        "title": "Efficient electron transmission in covalent organic framework nanosheets for highly active electrocatalytic carbon dioxide reduction",
+        "year": 2019,
+        "url": "https://www.nature.com/articles/s41467-019-14237-4",
+        "pdf_url": "https://www.nature.com/articles/s41467-019-14237-4.pdf",
+        "abstract": "Open-access chemistry paper on covalent organic framework nanosheets, electron transmission, and electrocatalytic carbon dioxide reduction.",
+    },
+    {
+        "paper_id": "chem-demo-06",
+        "title": "Designing covalent organic frameworks with Co-O4 atomic sites for efficient CO2 photoreduction",
+        "year": 2023,
+        "url": "https://www.nature.com/articles/s41467-023-36779-4",
+        "pdf_url": "https://www.nature.com/articles/s41467-023-36779-4.pdf",
+        "abstract": "Open-access chemistry paper on cobalt-coordinated covalent organic frameworks and CO2 photoreduction.",
+    },
+    {
+        "paper_id": "chem-demo-07",
+        "title": "Photocatalytic CO2 reduction to syngas using metallosalen covalent organic frameworks",
+        "year": 2023,
+        "url": "https://www.nature.com/articles/s41467-023-42757-7",
+        "pdf_url": "https://www.nature.com/articles/s41467-023-42757-7.pdf",
+        "abstract": "Open-access chemistry paper on metallosalen covalent organic frameworks and photocatalytic CO2 reduction to syngas.",
+    },
+    {
+        "paper_id": "chem-demo-08",
+        "title": "Oxygen-tolerant CO2 electroreduction over covalent organic frameworks via photoswitching control oxygen passivation strategy",
+        "year": 2024,
+        "url": "https://www.nature.com/articles/s41467-024-45959-9",
+        "pdf_url": "https://www.nature.com/articles/s41467-024-45959-9.pdf",
+        "abstract": "Open-access chemistry paper on oxygen-tolerant CO2 electroreduction over covalent organic frameworks.",
+    },
+]
 
 
 def _project_root() -> Path:
@@ -219,7 +287,7 @@ def _run_until_exit(processes: list[subprocess.Popen[bytes]]) -> int:
 
 @contextmanager
 def _quiet_index_loggers():
-    logger_names = ["paperscout.indexer", "paperscout.mineru_pipeline"]
+    logger_names = ["chemverify.indexer", "chemverify.mineru_pipeline"]
     previous = {name: logging.getLogger(name).level for name in logger_names}
     try:
         for name in logger_names:
@@ -328,9 +396,9 @@ def init_project(force_env: bool = typer.Option(False, "--force-env", help="Over
             "# Default model for question answering.\n"
             "OPENAI_MODEL=gpt-4o-mini\n\n"
             "# Local storage for PDFs, parsed text, and indexes.\n"
-            "PAPERVERIFIER_DATA_DIR=./data\n\n"
+            "CHEMVERIFY_DATA_DIR=./data\n\n"
             "# auto prefers CUDA or Apple MPS when PyTorch can use it, otherwise CPU.\n"
-            "PAPERVERIFIER_DEVICE=auto\n",
+            "CHEMVERIFY_DEVICE=auto\n",
             encoding="utf-8",
         )
         typer.echo(f"Wrote {env_path}")
@@ -343,17 +411,24 @@ def init_project(force_env: bool = typer.Option(False, "--force-env", help="Over
 def doctor() -> None:
     root = _project_root()
     settings = Settings.from_env(root_dir=root)
+    settings.ensure_dirs()
     report = torch_cuda_report()
     requested_device = settings.mineru_device or "auto"
     mineru_device = resolve_mineru_device(settings.mineru_device, purpose="MinerU PDF parsing")
     dense_device = resolve_torch_device(settings.dense_device, purpose="Dense retrieval")
     reranker_device = resolve_torch_device(settings.reranker_device, purpose="Reranking")
     accelerated = bool(report["cuda_available"] or report.get("mps_available"))
+    data_dir_writable = os.access(settings.data_dir, os.W_OK)
     rows = [
         ("Project root", str(root), "ok"),
+        ("Python", sys.version.split()[0], "ok"),
+        (".venv", "found" if root.joinpath(".venv").exists() else "missing", "ok" if root.joinpath(".venv").exists() else "warning"),
         (".env", "found" if root.joinpath(".env").exists() else "missing", "ok" if root.joinpath(".env").exists() else "warning"),
         ("OPENAI_API_KEY", "set" if settings.openai_api_key else "missing", "ok" if settings.openai_api_key else "warning"),
         ("Node.js", shutil.which("node") or "not found", "ok" if shutil.which("node") else "warning"),
+        ("MinerU command", settings.resolve_mineru_command(), "ok" if shutil.which(settings.resolve_mineru_command()) or Path(settings.resolve_mineru_command()).exists() else "warning"),
+        ("Data directory", str(settings.data_dir), "ok" if data_dir_writable else "error"),
+        ("CUDA_VISIBLE_DEVICES", os.getenv("CUDA_VISIBLE_DEVICES") or "not set", "ok"),
         ("Requested device", requested_device, "ok"),
         ("MinerU device", mineru_device, "ok" if mineru_device != "cpu" or not accelerated else "warning"),
         ("Dense device", dense_device, "ok" if dense_device != "cpu" or not accelerated else "warning"),
@@ -374,6 +449,8 @@ def doctor() -> None:
         table.add_row(name, value, f"[{color}]{status}[/]")
     console = Console()
     console.print(Panel(table, title=f"{app_name()} Doctor", border_style="cyan"))
+    if not accelerated:
+        console.print("[yellow]No accelerator detected. ChemVerify can run on CPU, but indexing will be slow.[/]")
 
 
 @app.command("add-pdfs")
@@ -440,8 +517,8 @@ def index_library(
         if not source_papers:
             corpus_key = f"{settings.corpus.venue}/{settings.corpus.year}/{settings.corpus.track}"
             raise RuntimeError(
-                f"No PDFs are registered for {corpus_key}. Run `paperverifier add-pdfs ./your-pdfs` "
-                "or `paperverifier demo-acl` first."
+                f"No PDFs are registered for {corpus_key}. Run `chemverify add-pdfs ./your-pdfs` "
+                "or `chemverify demo-chem` first."
             )
 
         staged_settings = _staged_index_settings(settings, run_id, stage_parse=run_parse)
@@ -512,7 +589,7 @@ def web(
         raise typer.Exit(code=1)
     if not settings.search_current_manifest_path.exists():
         typer.echo(
-            "No online index found. Run `./paperverifier index` first (Windows: `.\\paperverifier.cmd index`).",
+            "No online index found. Run `./chemverify index` first (Windows: `.\\chemverify.cmd index`).",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -523,18 +600,16 @@ def web(
         subprocess.run(["npm", "--prefix", str(web_dir), "install"], cwd=root, check=True)
 
     env = os.environ.copy()
-    env["PAPERVERIFIER_ROOT"] = str(root)
-    env["PAPERSCOUT_ROOT"] = str(root)
-    env["PAPERVERIFIER_API_BASE_URL"] = f"http://127.0.0.1:{api_port}/api"
-    env["PAPERSCOUT_API_BASE_URL"] = f"http://127.0.0.1:{api_port}/api"
-    env.setdefault("NEXT_PUBLIC_PAPERVERIFIER_APP_NAME", app_name())
-    env.setdefault("NEXT_PUBLIC_PAPERVERIFIER_APP_TAGLINE", app_tagline())
+    env["CHEMVERIFY_ROOT"] = str(root)
+    env["CHEMVERIFY_API_BASE_URL"] = f"http://127.0.0.1:{api_port}/api"
+    env.setdefault("NEXT_PUBLIC_CHEMVERIFY_APP_NAME", app_name())
+    env.setdefault("NEXT_PUBLIC_CHEMVERIFY_APP_TAGLINE", app_tagline())
     api_process = subprocess.Popen(
         [
             sys.executable,
             "-m",
             "uvicorn",
-            "paperscout.api.app:create_app",
+            "chemverify.api.app:create_app",
             "--factory",
             "--host",
             host,
@@ -553,7 +628,86 @@ def web(
     raise typer.Exit(code=_run_until_exit([api_process, web_process]))
 
 
-@app.command("demo-acl")
+def _download_chem_demo_pdf(settings: Settings, paper: dict[str, object]) -> tuple[Path, bool]:
+    paper_id = str(paper["paper_id"])
+    pdf_url = str(paper["pdf_url"])
+    destination = settings.pdf_dir / "chemistry" / str(settings.corpus.year) / settings.corpus.track / f"{paper_id}.pdf"
+    if destination.exists():
+        return destination, False
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with httpx.Client(timeout=settings.request_timeout, follow_redirects=True) as client:
+            response = client.get(pdf_url)
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "")
+            if "pdf" not in content_type.lower():
+                raise RuntimeError(f"download did not return a PDF. content_type={content_type}")
+            destination.write_bytes(response.content)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    return destination, True
+
+
+@app.command("demo-chem")
+def demo_chem(
+    max_papers: int = typer.Option(5, "--max-papers", min=1, help="Number of demo chemistry papers to download."),
+) -> None:
+    settings, store = _components_for_corpus(venue="chemistry", year=2026, track="demo")
+    selected = CHEM_DEMO_PAPERS[: min(max_papers, len(CHEM_DEMO_PAPERS))]
+    if max_papers > len(CHEM_DEMO_PAPERS):
+        Console(stderr=True).print(
+            f"[yellow]Only {len(CHEM_DEMO_PAPERS)} demo papers are bundled; downloading all of them.[/]"
+        )
+
+    existing = {paper.paper_id: paper for paper in store.load_raw_papers()}
+    downloaded = 0
+    cached = 0
+    console = Console()
+    with console.status("[bold cyan]Downloading chemistry demo PDFs...[/]"):
+        for item in selected:
+            try:
+                local_pdf, changed = _download_chem_demo_pdf(settings, item)
+            except Exception as exc:
+                _exit_with_error(f"Could not download demo PDF {item['paper_id']}: {exc}")
+            downloaded += int(changed)
+            cached += int(not changed)
+            text_for_keywords = f"{item['title']} {item['abstract']}"
+            existing[str(item["paper_id"])] = PaperRecord(
+                paper_id=str(item["paper_id"]),
+                title=str(item["title"]),
+                authors=[],
+                venue="chemistry",
+                year=int(item["year"]),
+                track="demo",
+                url=str(item["url"]),
+                pdf_url=str(item["pdf_url"]),
+                local_pdf_path=str(local_pdf.resolve()),
+                source="chemverify_demo",
+                abstract=str(item["abstract"]),
+                keywords=extract_keywords(text_for_keywords, limit=12),
+                metadata={"demo_url": item["url"], "downloaded_at": now_iso()},
+            )
+
+    store.save_raw_papers(sorted(existing.values(), key=lambda paper: paper.paper_id))
+    _write_search_current_scope([settings.corpus])
+    typer.echo(
+        json.dumps(
+            {
+                "corpus": settings.corpus.to_dict(),
+                "selected_papers": len(selected),
+                "downloaded_pdfs": downloaded,
+                "cached_pdfs": cached,
+                "pdf_dir": str(settings.pdf_dir / "chemistry" / str(settings.corpus.year) / settings.corpus.track),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    typer.echo("Next: run `./chemverify index`, then `./chemverify web` (Windows: `.\\chemverify.cmd ...`).")
+
+
+@app.command("demo-acl", hidden=True)
 def demo_acl(
     max_papers: int = typer.Option(100, "--max-papers", min=1, help="Number of ACL papers to download."),
     year: int = typer.Option(2025, "--year", help="ACL event year."),
@@ -574,7 +728,7 @@ def demo_acl(
     _write_search_current_scope([settings.corpus])
     typer.echo(summary.model_dump_json(indent=2))
     typer.echo(f"Downloaded PDFs are under {settings.pdf_dir / 'acl' / str(year) / corpus_track}")
-    typer.echo("Next: run `./paperverifier index`, then `./paperverifier web` (Windows: `.\\paperverifier.cmd ...`).")
+    typer.echo("Next: run `./chemverify index`, then `./chemverify web` (Windows: `.\\chemverify.cmd ...`).")
 
 
 @app.command("ingest-acl", hidden=True)

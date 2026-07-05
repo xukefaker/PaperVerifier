@@ -8,13 +8,13 @@ import httpx
 from fastapi.testclient import TestClient
 import numpy as np
 
-from paperscout.api import app
-from paperscout.config import Settings
-from paperscout.deep_chat.models import EvidencePack, HypothesisEvidencePack, RetrievedEvidence
-from paperscout.indexer import IndexBuilder
-from paperscout.models import PaperRecord
-from paperscout.search_current import rebuild_search_current
-from paperscout.storage import LocalStore
+from chemverify.api import app
+from chemverify.config import Settings
+from chemverify.deep_chat.models import EvidencePack, HypothesisEvidencePack, RetrievedEvidence
+from chemverify.indexer import IndexBuilder
+from chemverify.models import PaperRecord
+from chemverify.search_current import rebuild_search_current
+from chemverify.storage import LocalStore
 
 
 class _FakeOpenAIResponse:
@@ -301,11 +301,11 @@ def _refresh_search_current(settings: Settings) -> None:
 def _enable_mocked_api(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4-mini")
-    monkeypatch.setattr("paperscout.deep_chat.service.httpx.Client", _DeepChatClient)
-    monkeypatch.setattr("paperscout.encoders.SentenceTransformerEncoder.__init__", _fake_encoder_init)
-    monkeypatch.setattr("paperscout.encoders.SentenceTransformerEncoder.encode", _fake_encoder_encode)
-    monkeypatch.setattr("paperscout.reranker.CrossEncoderReranker.__init__", _fake_reranker_init)
-    monkeypatch.setattr("paperscout.reranker.CrossEncoderReranker.score_pairs", _fake_reranker_scores)
+    monkeypatch.setattr("chemverify.deep_chat.service.httpx.Client", _DeepChatClient)
+    monkeypatch.setattr("chemverify.encoders.SentenceTransformerEncoder.__init__", _fake_encoder_init)
+    monkeypatch.setattr("chemverify.encoders.SentenceTransformerEncoder.encode", _fake_encoder_encode)
+    monkeypatch.setattr("chemverify.reranker.CrossEncoderReranker.__init__", _fake_reranker_init)
+    monkeypatch.setattr("chemverify.reranker.CrossEncoderReranker.score_pairs", _fake_reranker_scores)
 
 
 def _fake_encoder_init(self, config) -> None:
@@ -340,7 +340,7 @@ def _fake_reranker_scores(self, pairs: list[tuple[str, str]]) -> np.ndarray:
 def test_deep_chat_api_returns_structured_answer(tmp_path: Path, monkeypatch) -> None:
     _enable_mocked_api(monkeypatch)
     settings = _seed_fixture_data(tmp_path)
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     store = LocalStore(settings)
     _build_and_refresh_search_current(settings, store)
 
@@ -383,9 +383,9 @@ def test_deep_chat_api_returns_409_on_upstream_failure(tmp_path: Path, monkeypat
             raise httpx.HTTPStatusError("bad gateway", request=request, response=response)
 
     _enable_mocked_api(monkeypatch)
-    monkeypatch.setattr("paperscout.deep_chat.service.httpx.Client", _FailingClient)
+    monkeypatch.setattr("chemverify.deep_chat.service.httpx.Client", _FailingClient)
     settings = _seed_fixture_data(tmp_path)
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     store = LocalStore(settings)
     _build_and_refresh_search_current(settings, store)
 
@@ -436,9 +436,9 @@ def test_deep_chat_api_downgrades_to_unsupported_when_verifier_rejects(tmp_path:
             )
 
     _enable_mocked_api(monkeypatch)
-    monkeypatch.setattr("paperscout.deep_chat.service.httpx.Client", _VerifierRejectClient)
+    monkeypatch.setattr("chemverify.deep_chat.service.httpx.Client", _VerifierRejectClient)
     settings = _seed_fixture_data(tmp_path)
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     store = LocalStore(settings)
     _build_and_refresh_search_current(settings, store)
 
@@ -489,9 +489,9 @@ def test_deep_chat_api_rejects_invalid_grounding_ids(tmp_path: Path, monkeypatch
             )
 
     _enable_mocked_api(monkeypatch)
-    monkeypatch.setattr("paperscout.deep_chat.service.httpx.Client", _InvalidGroundingClient)
+    monkeypatch.setattr("chemverify.deep_chat.service.httpx.Client", _InvalidGroundingClient)
     settings = _seed_fixture_data(tmp_path)
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     store = LocalStore(settings)
     _build_and_refresh_search_current(settings, store)
 
@@ -559,9 +559,9 @@ def test_deep_chat_api_retries_invalid_structured_output(tmp_path: Path, monkeyp
             return super().post(url, headers=headers, json=json)
 
     _enable_mocked_api(monkeypatch)
-    monkeypatch.setattr("paperscout.deep_chat.service.httpx.Client", _RetryingClient)
+    monkeypatch.setattr("chemverify.deep_chat.service.httpx.Client", _RetryingClient)
     settings = _seed_fixture_data(tmp_path)
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     store = LocalStore(settings)
     _build_and_refresh_search_current(settings, store)
 
@@ -624,9 +624,9 @@ def test_deep_chat_api_rejects_invalid_fact_grounding_ids(tmp_path: Path, monkey
             )
 
     _enable_mocked_api(monkeypatch)
-    monkeypatch.setattr("paperscout.deep_chat.service.httpx.Client", _InvalidFactClient)
+    monkeypatch.setattr("chemverify.deep_chat.service.httpx.Client", _InvalidFactClient)
     settings = _seed_fixture_data(tmp_path)
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     store = LocalStore(settings)
     _build_and_refresh_search_current(settings, store)
 
@@ -838,9 +838,9 @@ def test_deep_chat_api_rejects_cross_hypothesis_answer_grounding(tmp_path: Path,
             return super().post(url, headers=headers, json=json)
 
     _enable_mocked_api(monkeypatch)
-    monkeypatch.setattr("paperscout.deep_chat.service.httpx.Client", _CrossHypothesisGroundingClient)
+    monkeypatch.setattr("chemverify.deep_chat.service.httpx.Client", _CrossHypothesisGroundingClient)
     monkeypatch.setattr(
-        "paperscout.deep_chat.retriever.DeepChatRetriever.retrieve_for_hypotheses",
+        "chemverify.deep_chat.retriever.DeepChatRetriever.retrieve_for_hypotheses",
         _mock_retrieve_for_hypotheses,
     )
 
@@ -883,7 +883,7 @@ model = "gpt-5.4-mini"
             )
         ]
     )
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     _build_and_refresh_search_current(settings, store)
 
     with TestClient(app) as client:
@@ -1067,7 +1067,7 @@ def test_deep_chat_api_uses_recent_user_correction_to_select_interpretation(tmp_
             return super().post(url, headers=headers, json=json)
 
     _enable_mocked_api(monkeypatch)
-    monkeypatch.setattr("paperscout.deep_chat.service.httpx.Client", _CorrectionAwareClient)
+    monkeypatch.setattr("chemverify.deep_chat.service.httpx.Client", _CorrectionAwareClient)
 
     (tmp_path / "config.toml").write_text(
         """
@@ -1108,7 +1108,7 @@ model = "gpt-5.4-mini"
             )
         ]
     )
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     _build_and_refresh_search_current(settings, store)
 
     with TestClient(app) as client:
@@ -1164,9 +1164,9 @@ def test_deep_chat_api_asks_for_clarification_when_verifier_sees_no_clear_winner
             )
 
     _enable_mocked_api(monkeypatch)
-    monkeypatch.setattr("paperscout.deep_chat.service.httpx.Client", _NoClearWinnerClient)
+    monkeypatch.setattr("chemverify.deep_chat.service.httpx.Client", _NoClearWinnerClient)
     settings = _seed_fixture_data(tmp_path)
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     store = LocalStore(settings)
     _build_and_refresh_search_current(settings, store)
 

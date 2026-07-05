@@ -7,9 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from paperscout.config import CorpusSpec, Settings
-from paperscout.models import BuildIndexSummary, PaperRecord, ParseFailureRecord
-from paperscout.offline import (
+from chemverify.config import CorpusSpec, Settings
+from chemverify.models import BuildIndexSummary, PaperRecord, ParseFailureRecord
+from chemverify.offline import (
     IncrementalIndexBuilder,
     OfflineJobController,
     OfflineRunner,
@@ -152,8 +152,8 @@ def test_build_completed_skip_requires_matching_release_signature(tmp_path: Path
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n")
     source_paper = _make_paper(paper_id="2025.acl-long.1", pdf_path=pdf_path)
-    monkeypatch.setattr("paperscout.encoders.SentenceTransformerEncoder.__init__", _fake_encoder_init)
-    monkeypatch.setattr("paperscout.encoders.SentenceTransformerEncoder.encode", _fake_encoder_encode)
+    monkeypatch.setattr("chemverify.encoders.SentenceTransformerEncoder.__init__", _fake_encoder_init)
+    monkeypatch.setattr("chemverify.encoders.SentenceTransformerEncoder.encode", _fake_encoder_encode)
     builder = IncrementalIndexBuilder(settings, _ControllerStub())
     summary = _build_summary()
 
@@ -245,8 +245,8 @@ def test_job_state_is_reinitialized_for_each_run(tmp_path: Path, monkeypatch) ->
             "2026-03-27T10:10:00+00:00",
         ]
     )
-    monkeypatch.setattr("paperscout.offline.time.time", lambda: next(timestamps))
-    monkeypatch.setattr("paperscout.offline.now_iso", lambda: next(iso_values))
+    monkeypatch.setattr("chemverify.offline.time.time", lambda: next(timestamps))
+    monkeypatch.setattr("chemverify.offline.now_iso", lambda: next(iso_values))
 
     controller_one = OfflineJobController(settings, mode="resume")
     controller_two = OfflineJobController(settings, mode="resume")
@@ -272,7 +272,7 @@ def test_job_state_is_reinitialized_for_each_run(tmp_path: Path, monkeypatch) ->
 def test_job_id_is_unique_even_within_same_second(tmp_path: Path, monkeypatch) -> None:
     settings = Settings.from_env(tmp_path, corpus=CorpusSpec.from_values("acl", 2025, "long"))
     values = iter([1_000_000_001, 1_000_000_002])
-    monkeypatch.setattr("paperscout.offline.time.time_ns", lambda: next(values))
+    monkeypatch.setattr("chemverify.offline.time.time_ns", lambda: next(values))
 
     controller_one = OfflineJobController(settings, mode="resume")
     controller_two = OfflineJobController(settings, mode="resume")

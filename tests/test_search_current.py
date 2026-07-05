@@ -5,9 +5,9 @@ from pathlib import Path
 
 import numpy as np
 
-from paperscout.config import CorpusSpec, Settings
-from paperscout.search_current import rebuild_search_current
-from paperscout.storage import LocalStore
+from chemverify.config import CorpusSpec, Settings
+from chemverify.search_current import rebuild_search_current
+from chemverify.storage import LocalStore
 
 
 def _write_jsonl(path: Path, items: list[dict]) -> None:
@@ -310,7 +310,7 @@ model = "gpt-5.4-mini"
 """,
         encoding="utf-8",
     )
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(tmp_path / "data"))
     settings_one = _seed_completed_corpus(tmp_path, venue="acl", year=2025, track="long", ordinal=1)
     settings_two = _seed_completed_corpus(tmp_path, venue="acl", year=2024, track="long", ordinal=2)
 
@@ -361,7 +361,7 @@ model = "gpt-5.4-mini"
 """,
         encoding="utf-8",
     )
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(tmp_path / "data"))
     shared_paper_id = "2025.acl-overlap.1"
     _seed_completed_corpus(
         tmp_path,
@@ -402,7 +402,7 @@ model = "gpt-5.4-mini"
 """,
         encoding="utf-8",
     )
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(tmp_path / "data"))
     settings = _seed_completed_corpus(tmp_path, venue="acl", year=2025, track="long", ordinal=1)
 
     rebuild_search_current(tmp_path)
@@ -426,7 +426,7 @@ model = "gpt-5.4-mini"
 """,
         encoding="utf-8",
     )
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(tmp_path / "data"))
     settings_2025 = _seed_completed_corpus(tmp_path, venue="acl", year=2025, track="long", ordinal=1)
     _seed_completed_corpus(tmp_path, venue="acl", year=2024, track="long", ordinal=2)
 
@@ -453,7 +453,7 @@ model = "gpt-5.4-mini"
 """,
         encoding="utf-8",
     )
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(tmp_path / "data"))
     settings = _seed_completed_corpus(tmp_path, venue="acl", year=2024, track="long", ordinal=1)
     state_path = settings.state_dir / "job_state.json"
     payload = json.loads(state_path.read_text(encoding="utf-8"))

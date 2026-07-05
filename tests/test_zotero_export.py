@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from paperscout.config import Settings
-from paperscout.models import PaperRecord
-from paperscout.zotero_export import (
+from chemverify.config import Settings
+from chemverify.models import PaperRecord
+from chemverify.zotero_export import (
     build_public_export_path,
     build_zotero_export_payload,
     render_bibtex,

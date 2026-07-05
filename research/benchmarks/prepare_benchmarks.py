@@ -526,7 +526,7 @@ def build_registry(root: Path, summaries: list[dict[str, Any]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--project-root", type=Path, default=Path("/workspace/PaperScout"))
+    parser.add_argument("--project-root", type=Path, default=Path("/workspace/ChemVerify"))
     parser.add_argument("--hf-token", type=str, default=None)
     args = parser.parse_args()
 

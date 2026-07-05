@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from paperscout.mineru_pipeline import BatchItem, MinerUPipelineConfig, _build_batches, _progress_heartbeat, _run_batch
-from paperscout.models import PaperRecord
+from chemverify.mineru_pipeline import BatchItem, MinerUPipelineConfig, _build_batches, _progress_heartbeat, _run_batch
+from chemverify.models import PaperRecord
 
 
 def _batch_item(pdf_path: Path) -> BatchItem:
@@ -30,13 +30,13 @@ def _batch_item(pdf_path: Path) -> BatchItem:
 def test_run_batch_quiet_output_hides_noisy_parser_output(tmp_path: Path, monkeypatch, capsys) -> None:
     pdf_path = tmp_path / "paper.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n")
-    monkeypatch.setattr("paperscout.mineru_pipeline.read_fn", lambda path: b"pdf")
+    monkeypatch.setattr("chemverify.mineru_pipeline.read_fn", lambda path: b"pdf")
 
     def _fake_parse(**kwargs) -> None:
         print("noisy stdout")
         print("noisy stderr", file=sys.stderr)
 
-    monkeypatch.setattr("paperscout.mineru_pipeline.do_parse", _fake_parse)
+    monkeypatch.setattr("chemverify.mineru_pipeline.do_parse", _fake_parse)
 
     _run_batch(
         [_batch_item(pdf_path)],
@@ -57,14 +57,14 @@ def test_run_batch_quiet_output_hides_noisy_parser_output(tmp_path: Path, monkey
 def test_run_batch_quiet_output_exposes_text_stream_attributes(tmp_path: Path, monkeypatch) -> None:
     pdf_path = tmp_path / "paper.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n")
-    monkeypatch.setattr("paperscout.mineru_pipeline.read_fn", lambda path: b"pdf")
+    monkeypatch.setattr("chemverify.mineru_pipeline.read_fn", lambda path: b"pdf")
 
     def _fake_parse(**kwargs) -> None:
         assert sys.stdout.encoding
         assert sys.stderr.encoding
         assert not sys.stdout.isatty()
 
-    monkeypatch.setattr("paperscout.mineru_pipeline.do_parse", _fake_parse)
+    monkeypatch.setattr("chemverify.mineru_pipeline.do_parse", _fake_parse)
 
     _run_batch(
         [_batch_item(pdf_path)],
@@ -139,13 +139,13 @@ def test_default_mineru_batches_are_paper_sized_for_responsive_progress(tmp_path
 def test_run_batch_quiet_output_keeps_failure_tail(tmp_path: Path, monkeypatch) -> None:
     pdf_path = tmp_path / "paper.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n")
-    monkeypatch.setattr("paperscout.mineru_pipeline.read_fn", lambda path: b"pdf")
+    monkeypatch.setattr("chemverify.mineru_pipeline.read_fn", lambda path: b"pdf")
 
     def _fake_parse(**kwargs) -> None:
         print("parser tail")
         raise ValueError("boom")
 
-    monkeypatch.setattr("paperscout.mineru_pipeline.do_parse", _fake_parse)
+    monkeypatch.setattr("chemverify.mineru_pipeline.do_parse", _fake_parse)
 
     with pytest.raises(RuntimeError, match="MinerU output tail"):
         _run_batch(

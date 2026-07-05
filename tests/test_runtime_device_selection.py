@@ -3,10 +3,10 @@ from __future__ import annotations
 import sys
 import types
 
-from paperscout.config import Settings
-from paperscout.devices import resolve_mineru_device, resolve_torch_device
-from paperscout.encoders import EncoderConfig, SentenceTransformerEncoder
-from paperscout.reranker import CrossEncoderReranker, RerankerConfig
+from chemverify.config import Settings
+from chemverify.devices import resolve_mineru_device, resolve_torch_device
+from chemverify.encoders import EncoderConfig, SentenceTransformerEncoder
+from chemverify.reranker import CrossEncoderReranker, RerankerConfig
 
 
 def _install_fake_torch(
@@ -89,10 +89,10 @@ def test_cross_encoder_reranker_prefers_cuda_when_available(monkeypatch) -> None
 
 
 def test_settings_device_env_sets_all_runtime_devices(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("PAPERSCOUT_DEVICE", "cuda")
-    monkeypatch.delenv("PAPERSCOUT_MINERU_DEVICE", raising=False)
-    monkeypatch.delenv("PAPERSCOUT_DENSE_DEVICE", raising=False)
-    monkeypatch.delenv("PAPERSCOUT_RERANKER_DEVICE", raising=False)
+    monkeypatch.setenv("CHEMVERIFY_DEVICE", "cuda")
+    monkeypatch.delenv("CHEMVERIFY_MINERU_DEVICE", raising=False)
+    monkeypatch.delenv("CHEMVERIFY_DENSE_DEVICE", raising=False)
+    monkeypatch.delenv("CHEMVERIFY_RERANKER_DEVICE", raising=False)
 
     settings = Settings.from_env(tmp_path)
 

@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CMD="$ROOT/.venv/bin/paperverifier"
+CMD="$ROOT/.venv/bin/chemverify"
 
 if [[ ! -x "$CMD" ]]; then
-  printf 'PaperVerifier is not installed yet. Run ./scripts/install.sh first.\n' >&2
+  printf 'ChemVerify is not installed yet. Run ./scripts/install.sh first.\n' >&2
   exit 1
 fi
 

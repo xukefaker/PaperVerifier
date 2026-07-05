@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_ROOT="/workspace/PaperScout"
+PROJECT_ROOT="/workspace/ChemVerify"
 PYTHON_BIN="$PROJECT_ROOT/.venv/bin/python"
 SCRIPT_PATH="$PROJECT_ROOT/scripts/benchmarks/chemqa40/search_ablation_replay.py"
 ANNOTATION_FILE="$PROJECT_ROOT/data/benchmarks/chemqa40/ablation/input/chemqa40_search_benchmark_final.jsonl"

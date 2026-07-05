@@ -61,10 +61,10 @@ batch_size = 8
 [openai]
 enabled = true
 base_url = "https://api.openai.com/v1"
-model = "gpt-5.4-mini"
+model = "gpt-4o-mini"
 request_timeout = 60.0
 
 [grobid]
-enabled = true
+enabled = false
 base_url = "http://127.0.0.1:8070"
 timeout_seconds = 120.0

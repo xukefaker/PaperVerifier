@@ -5,12 +5,12 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from paperscout.api import app
-from paperscout.config import Settings
-from paperscout.indexer import IndexBuilder
-from paperscout.models import PaperRecord
-from paperscout.search_current import rebuild_search_current
-from paperscout.storage import LocalStore
+from chemverify.api import app
+from chemverify.config import Settings
+from chemverify.indexer import IndexBuilder
+from chemverify.models import PaperRecord
+from chemverify.search_current import rebuild_search_current
+from chemverify.storage import LocalStore
 
 
 def _json_dumps(payload: dict) -> str:
@@ -164,7 +164,7 @@ def _augment_with_multi_page_evidence(settings: Settings) -> None:
 
 def test_paper_viewer_api_returns_pdf_navigation_targets(tmp_path: Path, monkeypatch) -> None:
     settings = _seed_fixture_data(tmp_path)
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     _build_and_refresh_search_current(settings)
     _augment_with_multi_page_evidence(settings)
 
@@ -188,7 +188,7 @@ def test_paper_viewer_api_returns_pdf_navigation_targets(tmp_path: Path, monkeyp
 
 def test_paper_pdf_api_serves_pdf_bytes(tmp_path: Path, monkeypatch) -> None:
     settings = _seed_fixture_data(tmp_path)
-    monkeypatch.setenv("PAPERSCOUT_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("CHEMVERIFY_DATA_DIR", str(settings.data_dir))
     _build_and_refresh_search_current(settings)
 
     with TestClient(app) as client:

@@ -99,7 +99,7 @@ def resolve_mineru_device(device: str | None, *, purpose: str) -> str:
         return "cpu"
 
     if requested == "mps":
-        _warn_cpu(purpose, "MinerU parsing uses CUDA or CPU in PaperVerifier; falling back from MPS to CPU.")
+        _warn_cpu(purpose, "MinerU parsing uses CUDA or CPU in ChemVerify; falling back from MPS to CPU.")
         return "cpu"
 
     return requested

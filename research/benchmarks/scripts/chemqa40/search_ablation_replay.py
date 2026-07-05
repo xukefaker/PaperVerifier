@@ -14,22 +14,22 @@ from typing import Any
 
 import numpy as np
 
-PROJECT_ROOT = Path("/workspace/PaperScout")
+PROJECT_ROOT = Path("/workspace/ChemVerify")
 if str(PROJECT_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-CACHE_ROOT = Path(os.environ.get("PAPERSCOUT_CACHE_ROOT", "/workspace/caches"))
+CACHE_ROOT = Path(os.environ.get("CHEMVERIFY_CACHE_ROOT", "/workspace/caches"))
 os.environ.setdefault("XDG_CACHE_HOME", str(CACHE_ROOT))
 os.environ.setdefault("HF_HOME", str(CACHE_ROOT / "huggingface"))
 os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(Path(os.environ["HF_HOME"]) / "hub"))
 os.environ.setdefault("TRANSFORMERS_CACHE", str(Path(os.environ["HF_HOME"]) / "transformers"))
 os.environ.setdefault("TORCH_HOME", str(CACHE_ROOT / "torch"))
-os.environ.setdefault("PAPERSCOUT_DENSE_DEVICE", "cpu")
-os.environ.setdefault("PAPERSCOUT_RERANKER_DEVICE", "cuda:0")
+os.environ.setdefault("CHEMVERIFY_DENSE_DEVICE", "cpu")
+os.environ.setdefault("CHEMVERIFY_RERANKER_DEVICE", "cuda:0")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-from paperscout.config import Settings
-from paperscout.models import (  # noqa: E402
+from chemverify.config import Settings
+from chemverify.models import (  # noqa: E402
     EvidenceChunk,
     PaperResult,
     QueryPlan,
@@ -39,14 +39,14 @@ from paperscout.models import (  # noqa: E402
     TokenUsage,
     VerifierRubric,
 )
-from paperscout.planner import PlannerResult  # noqa: E402
-from paperscout.search import (  # noqa: E402
+from chemverify.planner import PlannerResult  # noqa: E402
+from chemverify.search import (  # noqa: E402
     SearchEngine,
     _aggregate_top_local_scores,
     _normalize_scores,
 )
-from paperscout.storage import LocalStore  # noqa: E402
-from paperscout.utils import cosine_similarity_matrix, truncate_text  # noqa: E402
+from chemverify.storage import LocalStore  # noqa: E402
+from chemverify.utils import cosine_similarity_matrix, truncate_text  # noqa: E402
 
 
 @dataclass(slots=True)

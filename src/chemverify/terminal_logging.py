@@ -28,7 +28,7 @@ def configure_terminal_logging() -> None:
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-    level_name = os.getenv("PAPERSCOUT_LOG_LEVEL", "INFO").upper()
+    level_name = os.getenv("CHEMVERIFY_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
     console = Console(stderr=True, soft_wrap=True)
     handler = RichHandler(
@@ -59,7 +59,7 @@ def configure_terminal_logging() -> None:
             logging.getLogger(str(record["name"])).log(int(record["level"].no), str(record["message"]))
 
         loguru_logger.remove()
-        loguru_logger.add(_loguru_sink, level=os.getenv("PAPERSCOUT_THIRD_PARTY_LOG_LEVEL", "WARNING").upper())
+        loguru_logger.add(_loguru_sink, level=os.getenv("CHEMVERIFY_THIRD_PARTY_LOG_LEVEL", "WARNING").upper())
     except Exception:
         pass
 

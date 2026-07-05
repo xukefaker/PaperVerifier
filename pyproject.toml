@@ -3,9 +3,9 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "paperverifier"
+name = "chemverify"
 version = "0.1.0"
-description = "Local paper search and evidence-grounded Q&A for your PDF library."
+description = "Local evidence-verified chemistry paper search for PDF libraries."
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "accelerate>=1.13.0",
@@ -30,10 +30,10 @@ dev = [
 ]
 
 [project.scripts]
-paperverifier = "paperscout.cli:app"
+chemverify = "chemverify.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/paperscout"]
+packages = ["src/chemverify"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
