@@ -7,6 +7,7 @@ import os
 import re
 import copy
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -139,6 +140,16 @@ def _env_with_local_node(root: Path) -> dict[str, str]:
         env["PATH"] = f"{node_bin}{os.pathsep}{env.get('PATH', '')}"
     env.setdefault("npm_config_cache", str(root / ".local" / "npm-cache"))
     return env
+
+
+def _ensure_port_free(host: str, port: int, label: str) -> None:
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind((host, port))
+        except OSError:
+            typer.echo(f"{label} port {port} is already in use. Choose another port with --{label.lower()}-port.", err=True)
+            raise typer.Exit(code=1)
 
 
 def _components() -> tuple[Settings, LocalStore]:
@@ -624,6 +635,8 @@ def web(
             err=True,
         )
         raise typer.Exit(code=1)
+    _ensure_port_free(host, web_port, "web")
+    _ensure_port_free(host, api_port, "api")
     npm_path = _tool_path(root, "npm")
     if npm_path is None:
         typer.echo("npm is required to start the web app. Run `./scripts/install.sh` first.", err=True)
