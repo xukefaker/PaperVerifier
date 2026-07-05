@@ -3,6 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CMD="$ROOT/.venv/bin/chemverify"
+LOCAL_NODE_BIN="$ROOT/.local/node/current/bin"
+
+if [[ -x "$LOCAL_NODE_BIN/node" ]]; then
+  export PATH="$LOCAL_NODE_BIN:$PATH"
+fi
 
 if [[ ! -x "$CMD" ]]; then
   printf 'ChemVerify is not installed yet. Run ./scripts/install.sh first.\n' >&2

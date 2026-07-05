@@ -11,9 +11,10 @@ Put PDFs in a folder, build a local index, then search and read papers through a
 ## Requirements
 
 - `uv`
-- Node.js 20 or newer
 - An OpenAI-compatible API key
 - CUDA or Apple MPS is optional. CPU works, but indexing is slower.
+
+The installer uses a system Node.js 20+ if one exists. Otherwise it downloads a local Node.js into `.local/node/`.
 
 ## Quick Start
 

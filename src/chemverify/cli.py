@@ -111,6 +111,35 @@ def _project_root() -> Path:
     return Path(PROJECT_ROOT).expanduser().resolve()
 
 
+def _local_node_bin(root: Path) -> Path | None:
+    candidates = [
+        root / ".local" / "node" / "current" / "bin",
+        root / ".local" / "node" / "current",
+    ]
+    for candidate in candidates:
+        node = shutil.which("node", path=str(candidate))
+        npm = shutil.which("npm", path=str(candidate))
+        if node and npm:
+            return candidate
+    return None
+
+
+def _tool_path(root: Path, name: str) -> str | None:
+    node_bin = _local_node_bin(root)
+    search_path = os.environ.get("PATH", "")
+    if node_bin is not None:
+        search_path = f"{node_bin}{os.pathsep}{search_path}"
+    return shutil.which(name, path=search_path)
+
+
+def _env_with_local_node(root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    node_bin = _local_node_bin(root)
+    if node_bin is not None:
+        env["PATH"] = f"{node_bin}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
 def _components() -> tuple[Settings, LocalStore]:
     settings = Settings.from_env(root_dir=_project_root())
     store = LocalStore(settings)
@@ -419,13 +448,14 @@ def doctor() -> None:
     reranker_device = resolve_torch_device(settings.reranker_device, purpose="Reranking")
     accelerated = bool(report["cuda_available"] or report.get("mps_available"))
     data_dir_writable = os.access(settings.data_dir, os.W_OK)
+    node_path = _tool_path(root, "node")
     rows = [
         ("Project root", str(root), "ok"),
         ("Python", sys.version.split()[0], "ok"),
         (".venv", "found" if root.joinpath(".venv").exists() else "missing", "ok" if root.joinpath(".venv").exists() else "warning"),
         (".env", "found" if root.joinpath(".env").exists() else "missing", "ok" if root.joinpath(".env").exists() else "warning"),
         ("OPENAI_API_KEY", "set" if settings.openai_api_key else "missing", "ok" if settings.openai_api_key else "warning"),
-        ("Node.js", shutil.which("node") or "not found", "ok" if shutil.which("node") else "warning"),
+        ("Node.js", node_path or "not found", "ok" if node_path else "warning"),
         ("MinerU command", settings.resolve_mineru_command(), "ok" if shutil.which(settings.resolve_mineru_command()) or Path(settings.resolve_mineru_command()).exists() else "warning"),
         ("Data directory", str(settings.data_dir), "ok" if data_dir_writable else "error"),
         ("CUDA_VISIBLE_DEVICES", os.getenv("CUDA_VISIBLE_DEVICES") or "not set", "ok"),
@@ -593,13 +623,14 @@ def web(
             err=True,
         )
         raise typer.Exit(code=1)
-    if shutil.which("npm") is None:
-        typer.echo("npm is required to start the web app.", err=True)
+    npm_path = _tool_path(root, "npm")
+    if npm_path is None:
+        typer.echo("npm is required to start the web app. Run `./scripts/install.sh` first.", err=True)
         raise typer.Exit(code=1)
     if install_deps and not web_dir.joinpath("node_modules").exists():
-        subprocess.run(["npm", "--prefix", str(web_dir), "install"], cwd=root, check=True)
+        subprocess.run([npm_path, "--prefix", str(web_dir), "install"], cwd=root, check=True)
 
-    env = os.environ.copy()
+    env = _env_with_local_node(root)
     env["CHEMVERIFY_ROOT"] = str(root)
     env["CHEMVERIFY_API_BASE_URL"] = f"http://127.0.0.1:{api_port}/api"
     env.setdefault("NEXT_PUBLIC_CHEMVERIFY_APP_NAME", app_name())
@@ -620,7 +651,7 @@ def web(
         env=env,
     )
     web_process = subprocess.Popen(
-        ["npm", "--prefix", str(web_dir), "run", "dev", "--", "--hostname", host, "--port", str(web_port)],
+        [npm_path, "--prefix", str(web_dir), "run", "dev", "--", "--hostname", host, "--port", str(web_port)],
         cwd=root,
         env=env,
     )

@@ -18,6 +18,7 @@ apps/web/node_modules/
 apps/web/.next/
 apps/web/out/
 apps/web/.turbo/
+.local/
 
 # OS / editor
 .DS_Store
