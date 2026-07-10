@@ -71,7 +71,7 @@ else
   install_local_node
 fi
 
-"$UV_BIN" python install 3.12
+"$UV_BIN" python install 3.12 --no-bin
 "$UV_BIN" venv --python 3.12 --allow-existing .venv
 
 # shellcheck disable=SC1091

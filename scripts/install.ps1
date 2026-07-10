@@ -77,7 +77,7 @@ if (Test-NodeOk) {
   Install-LocalNode
 }
 
-& $UvPath python install 3.12
+& $UvPath python install 3.12 --no-bin
 & $UvPath venv --python 3.12 --allow-existing .venv
 
 $env:VIRTUAL_ENV = Join-Path $Root ".venv"
