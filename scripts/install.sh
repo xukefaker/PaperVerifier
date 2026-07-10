@@ -6,7 +6,12 @@ cd "$ROOT"
 
 printf '\033[36mChemSearch installer\033[0m\n'
 
-if ! command -v uv >/dev/null 2>&1; then
+UV_BIN="$(command -v uv 2>/dev/null || true)"
+if [[ -z "$UV_BIN" && -x "$HOME/.local/bin/uv" ]]; then
+  UV_BIN="$HOME/.local/bin/uv"
+fi
+
+if [[ -z "$UV_BIN" ]]; then
   printf '\033[31muv is required. Install it first:\033[0m\n'
   printf 'curl -LsSf https://astral.sh/uv/install.sh | sh\n'
   exit 1
@@ -66,13 +71,13 @@ else
   install_local_node
 fi
 
-uv python install 3.12
-uv venv --python 3.12 --allow-existing .venv
+"$UV_BIN" python install 3.12
+"$UV_BIN" venv --python 3.12 --allow-existing .venv
 
 # shellcheck disable=SC1091
 source .venv/bin/activate
 
-uv pip install -e . --torch-backend=auto
+"$UV_BIN" pip install -e . --torch-backend=auto
 ./chemsearch init
 ./chemsearch doctor
 

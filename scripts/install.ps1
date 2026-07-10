@@ -5,7 +5,18 @@ Set-Location $Root
 
 Write-Host "ChemSearch installer" -ForegroundColor Cyan
 
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+$UvCommand = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $UvCommand) {
+  $UvCandidates = @(
+    (Join-Path $HOME ".local\bin\uv.exe"),
+    (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\uv.exe")
+  )
+  $UvPath = $UvCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+} else {
+  $UvPath = $UvCommand.Source
+}
+
+if (-not $UvPath) {
   Write-Host "uv is required. Install it first:" -ForegroundColor Red
   Write-Host "winget install --id=astral-sh.uv -e"
   exit 1
@@ -66,13 +77,13 @@ if (Test-NodeOk) {
   Install-LocalNode
 }
 
-uv python install 3.12
-uv venv --python 3.12 --allow-existing .venv
+& $UvPath python install 3.12
+& $UvPath venv --python 3.12 --allow-existing .venv
 
 $env:VIRTUAL_ENV = Join-Path $Root ".venv"
 $env:PATH = (Join-Path $env:VIRTUAL_ENV "Scripts") + ";" + $env:PATH
 
-uv pip install -e . --torch-backend=auto
+& $UvPath pip install -e . --torch-backend=auto
 & "$Root\chemsearch.cmd" init
 & "$Root\chemsearch.cmd" doctor
 
