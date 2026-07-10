@@ -443,6 +443,8 @@ def init_project(force_env: bool = typer.Option(False, "--force-env", help="Over
             encoding="utf-8",
         )
         typer.echo(f"Wrote {env_path}")
+    if os.name != "nt":
+        env_path.chmod(0o600)
     settings = Settings.from_env(root_dir=root, corpus=_personal_corpus())
     settings.ensure_dirs()
     typer.echo(f"Initialized {app_name()} at {root}")
