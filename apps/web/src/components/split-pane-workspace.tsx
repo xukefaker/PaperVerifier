@@ -126,7 +126,12 @@ function viewerBlockDomId(blockId: string): string {
 }
 
 function formatSectionLabel(sectionPath: string[]): string | null {
-  const cleaned = sectionPath.map((item) => item.trim()).filter(Boolean);
+  const cleaned = sectionPath
+    .map((item) => item.trim())
+    .filter((item) => {
+      const compact = item.toLowerCase().replace(/[^a-z0-9]+/g, '');
+      return Boolean(item) && compact !== 'articleinfo' && compact !== 'checkforupdates' && compact !== 'papertext';
+    });
   if (cleaned.length === 0) {
     return null;
   }
@@ -1233,7 +1238,8 @@ export function SplitPaneWorkspace({
       return;
     }
 
-    const userMessage: ChatMessage = { role: 'user', content: trimmedInput };
+    const messageNonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const userMessage: ChatMessage = { id: `user-${messageNonce}`, role: 'user', content: trimmedInput };
     setChatHistory((previous) => [...previous, userMessage]);
     setInput('');
     setIsTyping(true);
@@ -1246,12 +1252,12 @@ export function SplitPaneWorkspace({
       });
       setChatHistory((previous) => [
         ...previous,
-        { role: 'assistant', content: response.answer, citations: response.citations },
+        { id: `assistant-${messageNonce}`, role: 'assistant', content: response.answer, citations: response.citations },
       ]);
     } catch {
       setChatHistory((previous) => [
         ...previous,
-        { role: 'assistant', content: 'The paper chat request did not complete successfully.' },
+        { id: `assistant-error-${messageNonce}`, role: 'assistant', content: 'The paper chat request did not complete successfully.' },
       ]);
     } finally {
       setIsTyping(false);

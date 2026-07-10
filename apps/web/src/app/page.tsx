@@ -1,2082 +1,1505 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, FolderOpen, Loader2, Plus, Search } from 'lucide-react';
-
-import { usePresence } from '@/lib/animation/use-presence';
-import { useSequencedReveal } from '@/lib/animation/use-sequenced-reveal';
-import { runViewTransition } from '@/lib/animation/view-transition';
-import { ActivityMark, useTransientActivityMode } from '@/components/activity-mark';
-import { GlobalSearchPalette } from '@/components/global-search-palette';
-import { PaperResultCard } from '@/components/paper-result-card';
-import { ProjectWorkspacePanel } from '@/components/project-workspace-panel';
-import { QuickPeekPanel } from '@/components/quick-peek-panel';
-import { SplitPaneWorkspace } from '@/components/split-pane-workspace';
+import Image from 'next/image';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as Progress from '@radix-ui/react-progress';
+import * as Select from '@radix-ui/react-select';
+import * as Switch from '@radix-ui/react-switch';
+import * as Tabs from '@radix-ui/react-tabs';
 import {
-  clearProject,
-  createProject,
-  createSearchJob,
-  deleteProject,
-  fetchCorpusCatalog,
-  fetchProject,
-  fetchSearchJob,
-  fetchSearchJobResult,
-  fetchTrace,
-  listProjects,
-  updateProject,
-  upsertProjectPaperSession,
-  upsertProjectThread,
-} from '@/lib/client-api';
-import { clearCurrentProjectId, loadCurrentProjectId, saveCurrentProjectId } from '@/lib/project-ui-state';
-import { APP_NAME, APP_TAGLINE } from '@/lib/branding';
-import type {
-  CorpusCatalogEntry,
-  PaperChatCitation,
-  PaperResult,
-  ProjectDetailResponse,
-  ProjectPaperSession,
-  ProjectSearchThread,
-  ProjectSummary,
-  SearchJobProgress,
-  SearchJobStatus,
-  SearchTrace,
-} from '@/lib/types';
+  AlertCircle,
+  BookOpen,
+  Brain,
+  CheckCircle2,
+  ChevronDown,
+  Database,
+  Filter,
+  Layers3,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightOpen,
+  Play,
+  Quote,
+  RefreshCw,
+  Search,
+  Settings,
+  ThumbsDown,
+  ThumbsUp,
+  UploadCloud,
+} from 'lucide-react';
+import {
+  createColumnHelper,
+  flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type SortingState,
+} from '@tanstack/react-table';
 
-type SearchMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  type?: 'text' | 'search_results';
-  results?: PaperResult[];
-  status?: 'loading' | 'completed' | 'error';
-  currentStage?: string;
-  stageMessage?: string;
-  progress?: SearchJobProgress | null;
-  traceId?: string | null;
-  trace?: SearchTrace | null;
-  traceState?: 'idle' | 'loading' | 'loaded' | 'error';
-  traceError?: string | null;
-  traceOpen?: boolean;
+import { APP_NAME } from '@/lib/branding';
+import type { IndexingDevice, RetrievalMethod } from '@/lib/workbench-store';
+import { PaperPdfViewer } from '@/components/paper-pdf-viewer';
+
+type LibraryPaper = {
+  paper_id: string;
+  title: string;
+  authors: string[];
+  year: number;
+  venue: string;
+  pages: number;
+  figures: number;
+  status: 'ready' | 'indexing' | 'failed' | 'queued';
+  tags: string[];
+  updated_at: string;
+  abstract: string;
+  preview_label: string;
+};
+
+type LibraryJob = {
+  job_id: string;
+  kind: 'upload' | 'parse' | 'index';
+  file_name: string;
+  status: 'queued' | 'running' | 'ready' | 'failed';
+  progress: number;
+  message: string;
+  paper_id?: string;
+};
+
+type SearchResult = LibraryPaper & {
+  rank: number;
+  score: number;
+  retrieval_method: RetrievalMethod;
+  matched_terms: string[];
+  reason: string;
+  preview_image_url?: string | null;
+};
+
+type EvidenceUnit = {
+  evidence_id: string;
+  evidence_type?: string;
+  heading: string;
+  page_start: number;
+  page_end: number;
+  text: string;
+  caption?: string;
+  footnote?: string;
+  image_url?: string | null;
+  table?: {
+    rows: {
+      cells: {
+        text: string;
+        colspan?: number;
+        rowspan?: number;
+        is_header?: boolean;
+      }[];
+    }[];
+  } | null;
+  alias_evidence_ids?: string[];
+};
+
+type VisibleEvidenceUnit = EvidenceUnit & {
+  aliasEvidenceIds: string[];
+};
+
+type PaperViewer = {
+  paper_id: string;
+  title: string;
+  abstract: string;
+  evidence_units: EvidenceUnit[];
+};
+
+type WorkbenchSettings = {
+  library_path: string;
+  retrieval_method: RetrievalMethod;
+  qa_model: string;
+  qa_base_url: string;
+  qa_api_key: string;
+  qa_api_key_set?: boolean;
+  max_context_tokens: number;
+  qa_timeout_seconds: number;
+  enable_citations: boolean;
+  indexing_device: IndexingDevice;
+  cuda_visible_devices: string;
+};
+
+type SystemGpu = {
+  index: number;
+  name: string;
+  memory_total_mb: number;
+  memory_used_mb: number;
+  utilization_gpu: number;
+  processes: { pid: string; name: string; used_memory_mb: number }[];
+};
+
+type SystemGpuPayload = {
+  available: boolean;
+  cuda_visible_devices: string;
+  gpus: SystemGpu[];
+};
+
+type SearchStatus = {
+  job_id: string;
+  status: 'running' | 'completed' | 'failed';
+  stage: string;
+  message: string;
+  progress: number;
 };
 
 export type ChatMessage = {
+  id: string;
   role: 'user' | 'assistant';
   content: string;
-  citations?: PaperChatCitation[];
+  pending?: boolean;
+  citations?: {
+    evidence_id: string;
+    page_start: number;
+    page_end: number;
+    section_path: string[];
+    snippet: string;
+  }[];
+  feedback?: {
+    vote: 'up' | 'down';
+    reason?: FeedbackReason;
+    note?: string;
+    submitted_at: string;
+  };
 };
 
-type WorkspaceActionIntent = 'clear' | 'delete';
+type FeedbackReason = 'incorrect' | 'missing_evidence' | 'not_clear' | 'other';
 
-type ActiveSearchRun = {
-  assistantId: string;
-  query: string;
-  status: SearchJobStatus['status'];
-  currentStage?: string;
-  stageMessage?: string;
-  progress?: SearchJobProgress | null;
-  startedAt: number;
-  stageStartedAt: number;
+type FeedbackDraft = {
+  open: boolean;
+  reason: FeedbackReason;
+  note: string;
+  saving: boolean;
 };
 
-function buildDisplayResultsFromTrace(thread: ProjectSearchThread, trace: SearchTrace | null): PaperResult[] {
-  if (!trace) {
-    return [];
-  }
-  const satisfied = trace.final_results.satisfied ?? [];
-  const partial = trace.final_results.partial ?? [];
-  const allowedIds = new Set(thread.paper_ids ?? []);
-  const pool = [...satisfied, ...partial];
-  if (allowedIds.size === 0) {
-    return pool.slice(0, 10);
-  }
-  const resultById = new Map(pool.map((paper) => [paper.paper_id, paper]));
-  return thread.paper_ids
-    .map((paperId) => resultById.get(paperId))
-    .filter((paper): paper is PaperResult => paper != null)
-    .slice(0, 10);
-}
-
-function buildRestoredSearchMessages(thread: ProjectSearchThread, trace: SearchTrace | null): SearchMessage[] {
-  const displayResults = buildDisplayResultsFromTrace(thread, trace);
-  return [
-    {
-      id: `${thread.thread_id}-user`,
-      role: 'user',
-      content: thread.query,
-    },
-    {
-      id: `${thread.thread_id}-assistant`,
-      role: 'assistant',
-      content:
-        displayResults.length > 0
-          ? `Restored search. ${displayResults.length} papers are ready for review.`
-          : 'Restored search thread. Trace-backed paper results are not available right now.',
-      status: 'completed',
-      type: 'search_results',
-      results: displayResults,
-      progress: null,
-      traceId: thread.trace_id ?? null,
-      trace,
-      traceState: trace ? 'loaded' : 'idle',
-      traceError: null,
-      traceOpen: false,
-    },
-  ];
-}
-
-function projectSessionToChatMessages(session: ProjectPaperSession): ChatMessage[] {
-  return session.chat_history.map((message) => ({
-    role: message.role,
-    content: message.content,
-    citations: message.citations.map((citation) => ({
-      evidence_id: citation.evidence_id,
-      page_start: citation.page_start,
-      page_end: citation.page_end,
-      section_path: citation.section_path,
-      snippet: citation.snippet,
-      html: null,
-    })),
-  }));
-}
-
-function buildChatSessionsMap(sessions: ProjectPaperSession[]): Record<string, ChatMessage[]> {
-  return Object.fromEntries(sessions.map((session) => [session.paper_id, projectSessionToChatMessages(session)]));
-}
-
-function serializeProjectChatHistory(messages: ChatMessage[]) {
-  return messages.map((message) => ({
-    role: message.role,
-    content: message.content,
-    citations: (message.citations ?? []).map((citation) => ({
-      evidence_id: citation.evidence_id,
-      page_start: citation.page_start,
-      page_end: citation.page_end,
-      section_path: citation.section_path,
-      snippet: citation.snippet,
-    })),
-  }));
-}
-
-function buildProjectSessionSignature(payload: {
-  paperId: string;
-  paperTitle: string | null;
-  sourceThreadId: string | null;
-  chatHistory: ChatMessage[];
-}): string {
-  return JSON.stringify({
-    paperId: payload.paperId,
-    paperTitle: payload.paperTitle,
-    sourceThreadId: payload.sourceThreadId,
-    chatHistory: serializeProjectChatHistory(payload.chatHistory),
-  });
-}
-
-const SAMPLE_QUERIES = [
-  'Find papers on donor-acceptor covalent organic frameworks for coupled CO2 reduction and water oxidation.',
-  'Find papers on covalent organic framework photocatalysts for selective two-electron oxygen reduction to hydrogen peroxide.',
-  'Find papers on oxygen-vacancy-rich TiO2 for hydroperoxy-mediated selective benzene oxidation to phenol.',
+const retrievalOptions: { value: RetrievalMethod; label: string; shortLabel: string }[] = [
+  { value: 'bm25_full_text', label: 'BM25 full text', shortLabel: 'BM25' },
+  { value: 'colbertv2', label: 'ColBERTv2', shortLabel: 'ColBERTv2' },
+  { value: 'spladepp', label: 'SPLADE++', shortLabel: 'SPLADE++' },
+  { value: 'hybrid_bm25_colbertv2', label: 'Hybrid BM25 + ColBERTv2', shortLabel: 'BM25 + ColBERTv2' },
+  { value: 'hybrid_bm25_spladepp', label: 'Hybrid BM25 + SPLADE++', shortLabel: 'BM25 + SPLADE++' },
 ];
 
-const QUERY_SUGGESTION_GROUPS = [
-  {
-    label: 'Photocatalysis',
-    items: [
-      'Find papers on donor-acceptor covalent organic frameworks for coupled CO2 reduction and water oxidation.',
-      'Find papers on covalent organic framework photocatalysts for selective two-electron oxygen reduction to hydrogen peroxide.',
-      'Find papers on internal electric fields in MOF/COF heterojunctions for photocatalytic water splitting.',
-    ],
-  },
-  {
-    label: 'Reaction / Materials',
-    items: [
-      'Find papers on atomically dispersed cobalt or transition-metal sites in photocatalysts for nitrogen fixation.',
-      'Find papers on oxygen-vacancy-rich TiO2 for hydroperoxy-mediated selective benzene oxidation to phenol.',
-      'Find papers on light-triggered depolymerization of polypinacols for closed-loop chemical recycling.',
-    ],
-  },
-] as const;
+const indexingDeviceOptions: { value: IndexingDevice; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'cpu', label: 'CPU' },
+  { value: 'cuda', label: 'CUDA' },
+];
 
-const SEARCH_STAGE_SEQUENCE = [
-  { id: 'loading_index', short: 'Index', label: 'Load offline indexes' },
-  { id: 'planning_query', short: 'Plan', label: 'Parse the query' },
-  { id: 'candidate_generation', short: 'Recall', label: 'Generate candidate papers' },
-  { id: 'section_narrowing', short: 'Sections', label: 'Narrow to relevant sections' },
-  { id: 'evidence_assembly', short: 'Evidence', label: 'Assemble evidence packs' },
-  { id: 'final_verifier', short: 'Verify', label: 'Run the final verifier' },
-  { id: 'saving_trace', short: 'Save', label: 'Persist the trace' },
-] as const;
+const feedbackReasons: { value: FeedbackReason; label: string }[] = [
+  { value: 'incorrect', label: 'Incorrect' },
+  { value: 'missing_evidence', label: 'Missing evidence' },
+  { value: 'not_clear', label: 'Not clear' },
+  { value: 'other', label: 'Other' },
+];
 
-const SEARCH_STAGE_META = Object.fromEntries(
-  SEARCH_STAGE_SEQUENCE.map((stage) => [stage.id, stage]),
-) as Record<string, (typeof SEARCH_STAGE_SEQUENCE)[number]>;
+const sampleQuery = 'Find papers on donor-acceptor covalent organic frameworks for coupled CO2 reduction and water oxidation.';
+const columnHelper = createColumnHelper<LibraryPaper>();
 
-function clampPercentage(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
+function makeMessageId(role: ChatMessage['role']) {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `${role}-${crypto.randomUUID()}`;
   }
-  return Math.max(0, Math.min(100, value));
+  return `${role}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function progressSignature(progress: SearchJobProgress | null | undefined): string {
-  if (!progress) {
-    return 'none';
+function questionForAssistant(messages: ChatMessage[], assistantIndex: number) {
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') return messages[index].content;
   }
-
-  return [
-    progress.stage_index,
-    progress.stage_total,
-    progress.stage_progress,
-    progress.overall_progress,
-    progress.completed_items ?? '',
-    progress.total_items ?? '',
-  ].join(':');
+  return '';
 }
 
-function getStageMeta(stage: string | undefined) {
-  if (!stage) {
-    return null;
-  }
-  return SEARCH_STAGE_META[stage] ?? null;
+function normalizeEvidenceText(text: string) {
+  return text.replace(/\s+/g, ' ').trim();
 }
 
-function compactInteger(value: number): string {
-  return new Intl.NumberFormat('en', {
-    notation: value >= 1000 ? 'compact' : 'standard',
-    maximumFractionDigits: value >= 1000 ? 1 : 0,
-  }).format(value);
+function isGenericEvidenceHeading(heading?: string | null) {
+  const compact = (heading ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return compact === 'papertext' || compact === 'articleinfo' || compact === 'checkforupdates';
 }
 
-function titleCaseToken(value: string): string {
-  return value
-    .split('_')
-    .map((part) => (part.length <= 3 ? part.toUpperCase() : part[0]!.toUpperCase() + part.slice(1)))
-    .join(' ');
+function getEvidenceDedupeKey(unit: EvidenceUnit) {
+  return `${unit.evidence_type ?? ''}|${unit.heading.trim().toLowerCase()}|${unit.page_start}|${unit.page_end}|${normalizeEvidenceText(unit.text)}`;
 }
 
-function formatTimingMs(value: number | undefined): string {
-  if (!value || !Number.isFinite(value) || value <= 0) {
-    return '0 ms';
-  }
-  if (value < 1000) {
-    return `${Math.round(value)} ms`;
-  }
-  return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)} s`;
+function isStructuredEvidenceUnit(unit: EvidenceUnit) {
+  return Boolean(unit.image_url || unit.table?.rows?.length);
 }
 
-function formatElapsedCompact(valueMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(valueMs / 1000));
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}m ${seconds}s`;
+function evidenceAliases(unit: EvidenceUnit) {
+  return unit.alias_evidence_ids ?? [];
 }
 
-function formatProgressDetail(stage: string | undefined, progress: SearchJobProgress | null | undefined): string | null {
-  if (!progress) {
-    return null;
-  }
+function pagesOverlap(left: EvidenceUnit, right: EvidenceUnit) {
+  return left.page_start <= right.page_end && right.page_start <= left.page_end;
+}
 
-  const completed = progress.completed_items;
-  const total = progress.total_items;
-  if (completed != null && total != null && total > 0) {
-    if (stage === 'section_narrowing') {
-      return `${completed} / ${total} candidate papers narrowed to relevant sections`;
+function sameEvidenceRegion(left: EvidenceUnit, right: EvidenceUnit) {
+  return left.heading.trim().toLowerCase() === right.heading.trim().toLowerCase() && pagesOverlap(left, right);
+}
+
+function compactEvidenceUnits(units: EvidenceUnit[]): VisibleEvidenceUnit[] {
+  const compacted: VisibleEvidenceUnit[] = [];
+
+  for (const unit of units) {
+    if (isStructuredEvidenceUnit(unit)) {
+      compacted.push({ ...unit, aliasEvidenceIds: evidenceAliases(unit) });
+      continue;
     }
-    if (stage === 'evidence_assembly') {
-      return `${completed} / ${total} candidate papers assembled into evidence packs`;
+
+    const key = getEvidenceDedupeKey(unit);
+    const normalizedText = normalizeEvidenceText(unit.text);
+    const exactDuplicate = compacted.find((entry) => getEvidenceDedupeKey(entry) === key);
+    if (exactDuplicate) {
+      exactDuplicate.aliasEvidenceIds.push(unit.evidence_id, ...evidenceAliases(unit));
+      continue;
     }
-    if (stage === 'final_verifier') {
-      return `${completed} / ${total} candidate papers verified by the final model`;
+
+    const container = compacted.find((entry) => {
+      if (isStructuredEvidenceUnit(entry)) return false;
+      if (!sameEvidenceRegion(entry, unit)) return false;
+      const entryText = normalizeEvidenceText(entry.text);
+      return entryText.length > normalizedText.length && entryText.includes(normalizedText);
+    });
+    if (container) {
+      container.aliasEvidenceIds.push(unit.evidence_id, ...evidenceAliases(unit));
+      continue;
     }
+
+    const containedIndex = compacted.findIndex((entry) => {
+      if (isStructuredEvidenceUnit(entry)) return false;
+      if (!sameEvidenceRegion(entry, unit)) return false;
+      const entryText = normalizeEvidenceText(entry.text);
+      return normalizedText.length > entryText.length && normalizedText.includes(entryText);
+    });
+    if (containedIndex >= 0) {
+      const contained = compacted[containedIndex];
+      compacted[containedIndex] = {
+        ...unit,
+        aliasEvidenceIds: [contained.evidence_id, ...contained.aliasEvidenceIds, ...evidenceAliases(unit)],
+      };
+      continue;
+    }
+
+    compacted.push({ ...unit, aliasEvidenceIds: evidenceAliases(unit) });
   }
-  return null;
+
+  return compacted;
 }
 
-const SearchProgressPanel = memo(function SearchProgressPanel({
-  message,
-  stageElapsedMs = 0,
-  totalElapsedMs = 0,
-  compact = false,
-}: {
-  message: SearchMessage;
-  stageElapsedMs?: number;
-  totalElapsedMs?: number;
-  compact?: boolean;
-}) {
-  const progress = message.progress ?? null;
-  const stageMeta = getStageMeta(message.currentStage);
-  const isCompleted = message.status === 'completed';
-  const overallProgressPercent = clampPercentage(Math.round(((isCompleted ? 1 : (progress?.overall_progress ?? 0)) * 100)));
-  const detail = formatProgressDetail(message.currentStage, progress);
-  const activeStageIndex = progress?.stage_index ?? 0;
-  const activeStageShort = isCompleted ? 'Ready' : stageMeta?.short ?? 'Run';
-  const longRunning = !isCompleted && stageElapsedMs >= 8000;
-  const steadyNote = isCompleted
-    ? `Search wrapped in ${formatElapsedCompact(totalElapsedMs)}. Preparing the review view.`
-    : longRunning
-      ? `Still working in ${stageMeta?.label ?? 'the current stage'} • ${formatElapsedCompact(stageElapsedMs)} in this stage`
-      : null;
-
+function StructuredEvidenceTable({ unit }: { unit: VisibleEvidenceUnit }) {
+  if (!unit.table?.rows?.length) return null;
   return (
-    <div className={`search-progress-panel mt-2 w-full overflow-hidden rounded-[1.7rem] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(249,250,252,0.97))] ${compact ? 'search-progress-panel--compact max-w-[760px] p-5 shadow-[0_10px_24px_rgba(15,23,42,0.04)]' : 'max-w-[620px] p-5 shadow-[0_18px_42px_rgba(15,23,42,0.06)]'}`}>
-      <div className="search-progress-panel__rail" />
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex items-start gap-3">
-          <ActivityMark mode={isCompleted ? 'done' : 'active'} label={null} layout="inline" size="md" minimal={compact} />
-          <div className="min-w-0 flex-1 pt-0.5 text-left">
-            <div className="truncate text-[1rem] font-semibold tracking-tight text-slate-950">
-              {isCompleted ? 'Search complete' : stageMeta?.label ?? 'Preparing the search pipeline'}
-            </div>
-            <div className="mt-1 text-[0.8rem] leading-6 text-slate-500">
-              {isCompleted ? 'The evidence pass has finished and the result view is being prepared.' : message.stageMessage ?? 'Searching across the current corpus.'}
-            </div>
-          </div>
-        </div>
-        <div className="shrink-0 text-right">
-          <div className="text-[1.28rem] font-black tracking-tight text-slate-950">{overallProgressPercent}%</div>
-          <div className="text-[0.62rem] font-bold uppercase tracking-[0.2em] text-slate-400">{activeStageShort}</div>
-        </div>
-      </div>
-
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
-        <div
-          className="search-progress-fill h-full rounded-full bg-[linear-gradient(90deg,#4f46e5_0%,#6366f1_55%,#60a5fa_100%)] transition-[width] duration-500"
-          style={{ width: `${overallProgressPercent}%` }}
-        />
-      </div>
-
-      {compact ? (
-        <div className="mt-4 flex items-center gap-3">
-          <div className="search-stage-chip search-stage-chip--compact search-stage-chip--active inline-flex items-center gap-2 rounded-full border border-slate-300 bg-slate-950 px-3 py-2 text-[0.64rem] font-bold uppercase tracking-[0.16em] text-white">
-            <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
-            {activeStageShort}
-          </div>
-          <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-[0.62rem] font-bold uppercase tracking-[0.16em] text-slate-400">
-            Stage {progress?.stage_index ?? 0} of {progress?.stage_total ?? SEARCH_STAGE_SEQUENCE.length}
-          </div>
-        </div>
-      ) : (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {SEARCH_STAGE_SEQUENCE.map((stage, index) => {
-            const stageNumber = index + 1;
-            const isCompleted = activeStageIndex > stageNumber || message.status === 'completed';
-            const isActive = message.currentStage === stage.id;
-            return (
-              <div
-                key={stage.id}
-                className={`search-stage-chip inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[0.64rem] font-bold uppercase tracking-[0.16em] transition-colors ${
-                  isCompleted
-                    ? 'search-stage-chip--completed border-indigo-200 bg-indigo-50 text-indigo-700'
-                    : isActive
-                      ? 'search-stage-chip--active border-slate-300 bg-slate-950 text-white'
-                      : 'border-slate-200 bg-slate-50 text-slate-400'
-                }`}
-              >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    isCompleted ? 'bg-indigo-500' : isActive ? 'bg-cyan-300' : 'bg-slate-300'
-                  }`}
-                />
-                {stage.short}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {compact ? null : (
-        <>
-          {detail ? <div className="mt-3 text-[0.8rem] leading-6 text-slate-500">{detail}</div> : null}
-          {steadyNote ? <div className="mt-2 text-[0.75rem] font-medium leading-6 text-slate-400">{steadyNote}</div> : null}
-        </>
-      )}
-    </div>
-  );
-});
-
-function SearchSuggestionPanel({
-  onSelect,
-  variant,
-}: {
-  onSelect: (query: string) => void;
-  variant: 'hero' | 'dock';
-}) {
-  const compact = variant === 'dock';
-
-  return (
-    <div className={`rounded-[1.65rem] border border-white/85 bg-white/92 shadow-scholar-lg backdrop-blur-xl ${
-      compact ? 'p-4' : 'p-5'
-    }`}>
-      <div className='mb-3 flex items-center justify-between gap-3'>
-        <div className='text-[0.68rem] font-bold uppercase tracking-[0.22em] text-slate-400'>Query suggestions</div>
-        <div className='text-[0.68rem] font-medium text-slate-400'>Click to search</div>
-      </div>
-
-      <div className={`grid gap-3 ${compact ? 'lg:grid-cols-2' : 'md:grid-cols-2'}`}>
-        {QUERY_SUGGESTION_GROUPS.map((group) => (
-          <div key={group.label} className='rounded-[1.3rem] border border-slate-100 bg-slate-50/80 p-3.5'>
-            <div className='mb-3 text-[0.66rem] font-bold uppercase tracking-[0.22em] text-slate-400'>{group.label}</div>
-            <div className='flex flex-wrap gap-2'>
-              {group.items.map((query) => (
-                <button
-                  key={query}
-                  type='button'
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                  }}
-                  onClick={() => onSelect(query)}
-                  className='rounded-full border border-white/80 bg-white px-3.5 py-2 text-left text-[0.77rem] font-medium leading-5 text-slate-600 shadow-scholar-sm transition hover:border-indigo-200 hover:text-indigo-600'
-                >
-                  {query}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <table className="min-w-full border-collapse text-left text-[13px] leading-6 text-slate-700">
+        <tbody>
+          {unit.table.rows.map((row, rowIndex) => (
+            <tr key={`${unit.evidence_id}-row-${rowIndex}`} className={rowIndex === 0 ? 'bg-slate-50' : 'odd:bg-white even:bg-slate-50/50'}>
+              {row.cells.map((cell, cellIndex) => {
+                const cellClassName = 'border border-slate-200 px-3 py-2 align-top';
+                const key = `${unit.evidence_id}-cell-${rowIndex}-${cellIndex}`;
+                return cell.is_header || rowIndex === 0 ? (
+                  <th key={key} colSpan={cell.colspan} rowSpan={cell.rowspan} className={`${cellClassName} font-semibold text-slate-950`}>
+                    {cell.text}
+                  </th>
+                ) : (
+                  <td key={key} colSpan={cell.colspan} rowSpan={cell.rowspan} className={cellClassName}>
+                    {cell.text}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-const SearchRunningSkeletonGrid = memo(function SearchRunningSkeletonGrid() {
-  return (
-    <div className='grid grid-cols-1 gap-5 lg:grid-cols-3'>
-      {Array.from({ length: 3 }, (_, index) => (
-        <article
-          key={`running-skeleton-${index}`}
-          className='search-running-skeleton-card relative overflow-hidden rounded-[1.8rem] border border-slate-200/80 bg-white/96 p-5 shadow-[0_10px_24px_rgba(15,23,42,0.04)]'
-        >
-          <div className='search-running-skeleton-bar h-5 w-24 rounded-full' />
-          <div className='mt-6 space-y-3'>
-            <div className='search-running-skeleton-bar h-4 w-[88%] rounded-full' />
-            <div className='search-running-skeleton-bar h-4 w-[72%] rounded-full' />
-            <div className='search-running-skeleton-bar h-4 w-[64%] rounded-full' />
-          </div>
-          <div className='mt-8 space-y-2'>
-            <div className='search-running-skeleton-bar h-3.5 w-full rounded-full' />
-            <div className='search-running-skeleton-bar h-3.5 w-[82%] rounded-full' />
-          </div>
-          <div className='mt-8 border-t border-slate-100 pt-4'>
-            <div className='search-running-skeleton-bar h-10 w-full rounded-[1.1rem]' />
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-});
-
-const SearchRunningPreview = memo(function SearchRunningPreview({
-  run,
-}: {
-  run: ActiveSearchRun;
-}) {
-  const [clockMs, setClockMs] = useState(() => Date.now());
-
-  useEffect(() => {
-    const timerId = window.setInterval(() => {
-      setClockMs(Date.now());
-    }, 1000);
-    return () => window.clearInterval(timerId);
-  }, []);
-
-  const progressMessage: SearchMessage = {
-    id: run.assistantId,
-    role: 'assistant',
-    content: 'Running evidence-aware scholarly retrieval.',
-    status: run.status === 'completed' ? 'completed' : 'loading',
-    currentStage: run.currentStage,
-    stageMessage: run.stageMessage,
-    progress: run.progress ?? null,
-  };
-  const stageElapsedMs = Math.max(0, clockMs - run.stageStartedAt);
-  const totalElapsedMs = Math.max(0, clockMs - run.startedAt);
-
-  return (
-    <main className="relative z-30 flex flex-1 items-start justify-center px-5 pb-14 pt-10 sm:px-8 sm:pt-14">
-      <div className="w-full max-w-[1040px]">
-        <div className="mx-auto flex max-w-[860px] flex-col items-center text-center">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-[0.68rem] font-bold uppercase tracking-[0.22em] text-slate-500">
-            <span className="h-2 w-2 rounded-full bg-indigo-500" />
-            Search in progress
-          </div>
-          <div className="search-query-bubble w-full max-w-[46rem] rounded-[2rem] border border-slate-200/80 bg-white px-7 py-6 shadow-[0_12px_32px_rgba(15,23,42,0.04)]">
-            <div className="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.24em] text-slate-400">Query</div>
-            <div className="font-scholar text-[1.12rem] italic leading-9 text-slate-700">{run.query}</div>
-          </div>
-          <div className="mt-6 w-full flex justify-center">
-            <SearchProgressPanel message={progressMessage} stageElapsedMs={stageElapsedMs} totalElapsedMs={totalElapsedMs} compact />
-          </div>
-        </div>
-
-        <div className="mx-auto mt-10 max-w-[980px]">
-          <div className="mb-4 text-center text-[0.68rem] font-bold uppercase tracking-[0.22em] text-slate-400">
-            Preparing result cards
-          </div>
-          <SearchRunningSkeletonGrid />
-        </div>
-      </div>
-    </main>
-  );
-});
-
-function getSearchResultHeadline(message: SearchMessage): string {
-  if ((message.content ?? '').toLowerCase().startsWith('restored search')) {
-    return 'Workspace restored';
-  }
-  return 'Search complete';
-}
-
-function buildSearchStatusSnapshot(status: SearchJobStatus) {
-  return {
-    status: status.status,
-    currentStage: status.stage,
-    stageMessage: status.message,
-    progress: status.progress ?? null,
-  } satisfies Pick<ActiveSearchRun, 'status' | 'currentStage' | 'stageMessage' | 'progress'>;
-}
-
-function searchStatusSnapshotSignature(snapshot: Pick<ActiveSearchRun, 'status' | 'currentStage' | 'stageMessage' | 'progress'>): string {
-  return [snapshot.status, snapshot.currentStage ?? '', snapshot.stageMessage ?? '', progressSignature(snapshot.progress)].join('|');
-}
-
-function formatScopeChipLabel(corpusKey: string): string {
-  if (corpusKey === 'chemqa500_simple/2026/all') {
-    return 'ChemPaperSearch';
-  }
-  const [venue, year, track] = corpusKey.split('/');
-  if (!venue || !year || !track) {
-    return corpusKey;
-  }
-  return `${venue.toUpperCase()} ${year} ${track}`;
-}
-
-function summarizeWorkspaceScope(selectedCorpora: string[], catalog: CorpusCatalogEntry[]): string {
-  const catalogKeys = new Set(catalog.map((entry) => entry.corpus_key));
-  const available = selectedCorpora.filter((corpus) => catalogKeys.has(corpus));
-  const unavailableCount = selectedCorpora.length - available.length;
-  if (available.length === 0 && unavailableCount === 0) {
-    return 'No corpus selected';
-  }
-  if (available.length === 1 && unavailableCount === 0) {
-    return formatScopeChipLabel(available[0]!);
-  }
-  if (unavailableCount > 0) {
-    return `${available.length} active • ${unavailableCount} unavailable`;
-  }
-  return `${available.length} corpora selected`;
-}
-
-function SearchResultRevealGrid({
-  papers,
-  traceId,
-  onOpenPaper,
-  onQuickPeek,
-}: {
-  papers: PaperResult[];
-  traceId: string | null;
-  onOpenPaper: (paper: PaperResult, traceId?: string | null) => void;
-  onQuickPeek: (paper: PaperResult, traceId?: string | null) => void;
-}) {
-  const scope = useSequencedReveal([papers.map((paper) => paper.paper_id).join('|')]);
-
-  return (
-    <div ref={scope} className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
-      {papers.map((paper, index) => (
-        <div
-          key={paper.paper_id}
-          data-reveal-item
-          className="search-result-reveal"
-          style={{ animationDelay: `${Math.min(index, 5) * 70}ms` }}
-        >
-          <PaperResultCard
-            paper={paper}
-            onOpenPaper={(nextPaper) => onOpenPaper(nextPaper, traceId)}
-            onQuickPeek={(nextPaper) => onQuickPeek(nextPaper, traceId)}
+function EvidenceUnitBody({ unit }: { unit: VisibleEvidenceUnit }) {
+  if (unit.image_url) {
+    return (
+      <figure className="space-y-3">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <Image
+            src={unit.image_url}
+            alt={unit.caption || unit.text || unit.heading}
+            width={960}
+            height={720}
+            unoptimized
+            className="mx-auto max-h-[520px] w-full object-contain"
           />
         </div>
-      ))}
-    </div>
-  );
-}
-
-function SearchTracePanel({
-  message,
-  onToggle,
-}: {
-  message: SearchMessage;
-  onToggle: () => void;
-}) {
-  if (!message.traceId) {
-    return null;
+        {unit.caption || unit.text ? <figcaption className="text-sm leading-7 text-slate-600">{unit.caption || unit.text}</figcaption> : null}
+        {unit.footnote ? <p className="text-xs leading-5 text-slate-500">{unit.footnote}</p> : null}
+      </figure>
+    );
   }
 
-  const isOpen = message.traceOpen ?? false;
-  const tracePresence = usePresence(isOpen, 180);
-  const trace = message.trace ?? null;
-  const sourceSizes = (trace?.filter_summary?.source_sizes ?? {}) as Record<string, number>;
-  const verifierSummary = (trace?.verifier_summary ?? {}) as Record<string, unknown>;
-  const timingEntries = Object.entries(trace?.timings_ms ?? {}).filter(([, value]) => Number.isFinite(value)).slice(0, 6);
-
-  return (
-    <div className='mt-5 rounded-[1.6rem] border border-slate-200/90 bg-white/90 p-5 shadow-scholar-sm'>
-      <button
-        type='button'
-        onClick={onToggle}
-        className='flex w-full items-center justify-between gap-4 text-left'
-      >
-        <div>
-          <div className='text-[0.68rem] font-bold uppercase tracking-[0.22em] text-slate-400'>Search trace</div>
-          <div className='mt-1 text-[0.96rem] font-semibold tracking-tight text-slate-900'>
-            Inspect how this result was planned, recalled, and verified.
-          </div>
-        </div>
-        <div className='inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-[0.68rem] font-bold uppercase tracking-[0.18em] text-slate-500'>
-          {isOpen ? 'Hide' : 'Show'}
-          {isOpen ? <ChevronUp className='h-3.5 w-3.5' /> : <ChevronDown className='h-3.5 w-3.5' />}
-        </div>
-      </button>
-
-      {tracePresence.mounted ? (
-        <div className='psa-collapse overflow-hidden' data-state={isOpen ? 'open' : 'closed'}>
-          <div>
-            {message.traceState === 'loading' ? (
-              <div className='mt-4 flex items-center gap-2 text-[0.82rem] font-semibold uppercase tracking-[0.16em] text-slate-500'>
-                <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                Loading trace details
-              </div>
-            ) : message.traceState === 'error' ? (
-              <div className='mt-4 rounded-[1.2rem] border border-rose-200 bg-rose-50 px-4 py-3 text-[0.92rem] leading-7 text-rose-700'>
-                {message.traceError ?? 'Trace details could not be loaded.'}
-              </div>
-            ) : trace ? (
-              <div className='mt-5 grid gap-4 lg:grid-cols-2'>
-                <div className='rounded-[1.3rem] border border-slate-200 bg-slate-50/80 p-4'>
-                  <div className='text-[0.66rem] font-bold uppercase tracking-[0.22em] text-slate-400'>Planner</div>
-                  {trace.workspace_scope.length > 0 ? (
-                    <div className='mt-4'>
-                      <div className='mb-2 text-[0.64rem] font-bold uppercase tracking-[0.18em] text-slate-400'>Workspace scope</div>
-                      <div className='flex flex-wrap gap-2'>
-                        {trace.workspace_scope.map((corpusKey) => (
-                          <span key={`workspace-${corpusKey}`} className='rounded-full border border-slate-200 bg-white px-3 py-1 text-[0.72rem] font-semibold text-slate-600'>
-                            {formatScopeChipLabel(corpusKey)}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                  {trace.effective_scope.length > 0 ? (
-                    <div className='mt-4'>
-                      <div className='mb-2 text-[0.64rem] font-bold uppercase tracking-[0.18em] text-slate-400'>Effective scope</div>
-                      <div className='flex flex-wrap gap-2'>
-                        {trace.effective_scope.map((corpusKey) => (
-                          <span key={`effective-${corpusKey}`} className='rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-[0.72rem] font-semibold text-indigo-600'>
-                            {formatScopeChipLabel(corpusKey)}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className='mt-3 flex flex-wrap gap-2'>
-                    {trace.query_plan.scope_constraints.venues.map((venue) => (
-                      <span key={`venue-${venue}`} className='rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-[0.72rem] font-semibold text-indigo-600'>
-                        {venue.toUpperCase()}
-                      </span>
-                    ))}
-                    {trace.query_plan.scope_constraints.years.map((year) => (
-                      <span key={`year-${year}`} className='rounded-full border border-slate-200 bg-white px-3 py-1 text-[0.72rem] font-semibold text-slate-600'>
-                        {year}
-                      </span>
-                    ))}
-                    {(trace.query_plan.scope_constraints.tracks ?? []).map((track) => (
-                      <span key={`track-${track}`} className='rounded-full border border-slate-200 bg-white px-3 py-1 text-[0.72rem] font-semibold text-slate-600'>
-                        {track}
-                      </span>
-                    ))}
-                    {trace.query_plan.entity_terms.slice(0, 6).map((term) => (
-                      <span key={`entity-${term}`} className='rounded-full border border-slate-200 bg-white px-3 py-1 text-[0.72rem] font-semibold text-slate-600'>
-                        {term}
-                      </span>
-                    ))}
-                  </div>
-                  {trace.query_plan.aspect_queries.length > 0 ? (
-                    <div className='mt-4 space-y-2'>
-                      {trace.query_plan.aspect_queries.slice(0, 4).map((aspect) => (
-                        <div key={aspect.aspect_id} className='rounded-[1rem] border border-white/90 bg-white px-3 py-2 text-[0.84rem] leading-6 text-slate-600'>
-                          {aspect.query}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className='rounded-[1.3rem] border border-slate-200 bg-slate-50/80 p-4'>
-                  <div className='text-[0.66rem] font-bold uppercase tracking-[0.22em] text-slate-400'>Recall</div>
-                  <div className='mt-4 grid grid-cols-2 gap-3'>
-                    {Object.entries(sourceSizes).length > 0 ? Object.entries(sourceSizes).map(([source, count]) => (
-                      <div key={source} className='rounded-[1rem] border border-white/90 bg-white px-3 py-3'>
-                        <div className='text-[0.64rem] font-bold uppercase tracking-[0.18em] text-slate-400'>{titleCaseToken(source)}</div>
-                        <div className='mt-2 text-[1.05rem] font-black tracking-tight text-slate-900'>{compactInteger(count)}</div>
-                      </div>
-                    )) : (
-                      <div className='col-span-2 rounded-[1rem] border border-white/90 bg-white px-3 py-3 text-[0.9rem] leading-6 text-slate-500'>
-                        Recall source statistics are not available for this run.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className='rounded-[1.3rem] border border-slate-200 bg-slate-50/80 p-4'>
-                  <div className='text-[0.66rem] font-bold uppercase tracking-[0.22em] text-slate-400'>Verifier</div>
-                  <div className='mt-4 grid grid-cols-2 gap-3'>
-                    {[
-                      { label: 'Candidate pool', value: verifierSummary.candidate_pool_count },
-                      { label: 'Satisfied', value: verifierSummary.satisfied_count },
-                      { label: 'Partial', value: verifierSummary.partial_count },
-                      { label: 'Rejected', value: verifierSummary.rejected_count },
-                    ].map(({ label, value }) => (
-                      <div key={label} className='rounded-[1rem] border border-white/90 bg-white px-3 py-3'>
-                        <div className='text-[0.64rem] font-bold uppercase tracking-[0.18em] text-slate-400'>{label}</div>
-                        <div className='mt-2 text-[1.05rem] font-black tracking-tight text-slate-900'>
-                          {typeof value === 'number' ? compactInteger(value) : '—'}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className='rounded-[1.3rem] border border-slate-200 bg-slate-50/80 p-4'>
-                  <div className='text-[0.66rem] font-bold uppercase tracking-[0.22em] text-slate-400'>Timing</div>
-                  <div className='mt-4 space-y-2'>
-                    {timingEntries.length > 0 ? timingEntries.map(([key, value]) => (
-                      <div key={key} className='flex items-center justify-between rounded-[1rem] border border-white/90 bg-white px-3 py-2.5 text-[0.84rem] text-slate-600'>
-                        <span className='font-semibold'>{titleCaseToken(key)}</span>
-                        <span className='font-black tracking-tight text-slate-900'>{formatTimingMs(value)}</span>
-                      </div>
-                    )) : (
-                      <div className='rounded-[1rem] border border-white/90 bg-white px-3 py-3 text-[0.9rem] leading-6 text-slate-500'>
-                        Timing statistics are not available for this run.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className='mt-4 text-[0.9rem] leading-7 text-slate-500'>Open this panel to load the structured search trace.</div>
-            )}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function WorkspaceConfirmDialog({
-  open,
-  title,
-  description,
-  confirmLabel,
-  tone,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  open: boolean;
-  title: string;
-  description: string;
-  confirmLabel: string;
-  tone: 'warning' | 'danger';
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const { mounted, phase } = usePresence(open, 180);
-  const accentClassName =
-    tone === 'danger'
-      ? 'border-rose-200 bg-rose-50 text-rose-600'
-      : 'border-amber-200 bg-amber-50 text-amber-600';
-  const confirmClassName =
-    tone === 'danger'
-      ? 'bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-300'
-      : 'bg-slate-950 hover:bg-indigo-600 focus-visible:ring-indigo-300';
-
-  if (!mounted) {
-    return null;
+  if (unit.table?.rows?.length) {
+    return (
+      <div className="space-y-3">
+        <StructuredEvidenceTable unit={unit} />
+        {unit.caption ? <p className="text-sm leading-7 text-slate-600">{unit.caption}</p> : null}
+        {unit.footnote ? <p className="text-xs leading-5 text-slate-500">{unit.footnote}</p> : null}
+      </div>
+    );
   }
 
+  return unit.text ? <p className="text-sm leading-7 text-slate-700">{unit.text}</p> : null;
+}
+
+async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const body = init?.body;
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const response = await fetch(path, {
+    ...init,
+    headers: body && !isFormData ? { 'Content-Type': 'application/json', ...(init.headers ?? {}) } : init?.headers,
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text;
+    try {
+      const payload = JSON.parse(text) as { detail?: string; error?: { message?: string; fix?: string } };
+      message = payload.error?.message ?? payload.detail ?? text;
+      if (payload.error?.fix) message = `${message} ${payload.error.fix}`;
+    } catch {}
+    throw new Error(message);
+  }
+  return (await response.json()) as T;
+}
+
+function StatusBadge({ status }: { status: LibraryPaper['status'] | LibraryJob['status'] }) {
+  const palette = {
+    ready: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    running: 'border-blue-200 bg-blue-50 text-blue-700',
+    indexing: 'border-blue-200 bg-blue-50 text-blue-700',
+    queued: 'border-amber-200 bg-amber-50 text-amber-700',
+    failed: 'border-rose-200 bg-rose-50 text-rose-700',
+  }[status];
+  return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${palette}`}>{status}</span>;
+}
+
+function SelectControl<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+}) {
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 sm:p-6">
-      <div
-        data-state={phase}
-        onClick={busy ? undefined : onCancel}
-        className="psa-overlay-backdrop absolute inset-0 bg-slate-950/34"
-      />
-      <section
-        data-state={phase}
-        className="psa-modal-surface relative z-10 w-full max-w-[480px] overflow-hidden rounded-[2rem] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.98))] shadow-[0_30px_90px_rgba(15,23,42,0.24)]"
-      >
-            <div className="border-b border-slate-200/70 px-7 py-6">
-              <div className="flex items-start gap-4">
-                <div className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[1rem] border ${accentClassName}`}>
-                  <AlertTriangle className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[0.66rem] font-black uppercase tracking-[0.22em] text-slate-400">Workspace action</div>
-                  <h3 className="mt-2 text-[1.15rem] font-black tracking-tight text-slate-950">{title}</h3>
-                  <p className="mt-2 text-[0.92rem] leading-7 text-slate-500">{description}</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 bg-white/72 px-7 py-5">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={onCancel}
-                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-[0.74rem] font-bold uppercase tracking-[0.18em] text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={onConfirm}
-                className={`inline-flex min-w-[10rem] items-center justify-center rounded-full px-4 py-2.5 text-[0.74rem] font-bold uppercase tracking-[0.18em] text-white transition focus-visible:outline-none focus-visible:ring-4 disabled:cursor-not-allowed disabled:opacity-60 ${confirmClassName}`}
-              >
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : confirmLabel}
-              </button>
-            </div>
-      </section>
+    <label className="block">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</span>
+      <Select.Root value={value} onValueChange={(next) => onChange(next as T)}>
+        <Select.Trigger className="flex h-11 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 text-left text-sm font-medium text-slate-900 shadow-sm outline-none transition hover:border-slate-300 focus:border-blue-500">
+          <Select.Value />
+          <Select.Icon>
+            <ChevronDown className="h-4 w-4 text-slate-500" />
+          </Select.Icon>
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Content className="z-50 min-w-[260px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+            <Select.Viewport>
+              {options.map((option) => (
+                <Select.Item
+                  key={option.value}
+                  value={option.value}
+                  className="cursor-pointer rounded-lg px-3 py-2 text-sm outline-none hover:bg-slate-100 data-[highlighted]:bg-slate-100"
+                >
+                  <Select.ItemText>
+                    <span className="block font-medium text-slate-900">{option.label}</span>
+                  </Select.ItemText>
+                </Select.Item>
+              ))}
+            </Select.Viewport>
+          </Select.Content>
+        </Select.Portal>
+      </Select.Root>
+    </label>
+  );
+}
+
+function MetricCard({ label, value, icon: Icon }: { label: string; value: string | number; icon: typeof Database }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="text-2xl font-semibold text-slate-950">{value}</div>
+      <div className="text-sm text-slate-500">{label}</div>
     </div>
   );
 }
 
-export default function ChatPage() {
-  const [messages, setMessages] = useState<SearchMessage[]>([]);
-  const [activeSearchRun, setActiveSearchRun] = useState<ActiveSearchRun | null>(null);
-  const [input, setInput] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [selectedPaper, setSelectedPaper] = useState<PaperResult | null>(null);
-  const [previewPaper, setPreviewPaper] = useState<{ paper: PaperResult; threadId: string | null } | null>(null);
-  const [isComposerFocused, setIsComposerFocused] = useState(false);
-  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-  const [paletteInput, setPaletteInput] = useState('');
-  const [chatSessions, setChatSessions] = useState<Record<string, ChatMessage[]>>({});
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [projectDetail, setProjectDetail] = useState<ProjectDetailResponse | null>(null);
-  const [projectState, setProjectState] = useState<'loading' | 'ready' | 'error'>('ready');
-  const [projectError, setProjectError] = useState<string | null>(null);
-  const [corpusCatalog, setCorpusCatalog] = useState<CorpusCatalogEntry[]>([]);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false);
-  const [isProjectMutating, setIsProjectMutating] = useState(false);
-  const [isScopeSaving, setIsScopeSaving] = useState(false);
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [workspaceActionIntent, setWorkspaceActionIntent] = useState<WorkspaceActionIntent | null>(null);
+function isGpuBusy(gpu: SystemGpu) {
+  return gpu.processes.length > 0 || gpu.memory_used_mb > 1024;
+}
 
-  const searchScrollRef = useRef<HTMLElement | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const previousMessageCountRef = useRef(0);
-  const pendingSearchScrollTopRef = useRef<number | null>(null);
-  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const composerRegionRef = useRef<HTMLDivElement | null>(null);
-  const searchInFlightRef = useRef(false);
-  const projectLoadRequestRef = useRef(0);
-  const currentProjectIdRef = useRef<string | null>(null);
-  const paperSessionPersistTimersRef = useRef<Record<string, number>>({});
-  const lastPaperSessionPersistSignatureRef = useRef<Record<string, string>>({});
-  const activeSearchSnapshotRef = useRef<string>('none');
-  const activeSearchUpdatedAtRef = useRef(0);
-  const hasSearchHistory = messages.length > 0;
-  const hasThreadView = hasSearchHistory || activeSearchRun != null;
-  const isRunningView = activeSearchRun != null;
-  const currentProjectTitle = projectDetail?.project.title ?? projects.find((project) => project.project_id === currentProjectId)?.title ?? null;
-  const currentSelectedCorpora = projectDetail?.project.selected_corpora ?? [];
-  const currentCatalogKeySet = useMemo(() => new Set(corpusCatalog.map((entry) => entry.corpus_key)), [corpusCatalog]);
-  const unavailableSelectedCorpora = useMemo(
-    () => currentSelectedCorpora.filter((corpus) => !currentCatalogKeySet.has(corpus)),
-    [currentCatalogKeySet, currentSelectedCorpora],
+function GpuState({ gpu, selected }: { gpu: SystemGpu; selected: boolean }) {
+  const busy = isGpuBusy(gpu);
+  const state = selected ? 'Selected for indexing' : busy ? 'In use' : 'Available';
+  const palette = selected
+    ? 'bg-blue-50 text-blue-700'
+    : busy
+      ? 'bg-amber-50 text-amber-700'
+      : 'bg-emerald-50 text-emerald-700';
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${palette}`}>{state}</span>;
+}
+
+function PaperPreview({ imageUrl }: { imageUrl?: string | null }) {
+  return (
+    <div className="relative h-28 min-w-40 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+      {imageUrl ? (
+        <Image src={imageUrl} alt="" fill sizes="160px" className="object-contain p-2" unoptimized />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center px-3 text-center text-xs font-medium text-slate-400">
+          No figure preview
+        </div>
+      )}
+    </div>
   );
-  const scopeSummary = useMemo(
-    () => summarizeWorkspaceScope(currentSelectedCorpora, corpusCatalog),
-    [corpusCatalog, currentSelectedCorpora],
-  );
-  const searchBlockedReason = useMemo(() => {
-    if (!currentProjectId) {
-      return null;
-    }
-    if (currentSelectedCorpora.length === 0) {
-      return 'Select at least one corpus in this workspace before searching.';
-    }
-    if (unavailableSelectedCorpora.length > 0) {
-      return 'Remove unavailable corpora from this workspace before searching.';
-    }
-    return null;
-  }, [currentProjectId, currentSelectedCorpora.length, unavailableSelectedCorpora.length]);
-  const hasWorkspaces = projects.length > 0;
-  const isProjectBusy = projectState === 'loading' || isProjectMutating;
-  const headerActivityMode = useTransientActivityMode(isSearching);
-  const nextDefaultWorkspaceTitle = useMemo(() => {
-    const normalizedTitles = new Set(projects.map((project) => project.title.trim().toLowerCase()));
-    const baseTitle = 'Untitled workspace';
-    if (!normalizedTitles.has(baseTitle.toLowerCase())) {
-      return baseTitle;
-    }
-    let index = 2;
-    while (normalizedTitles.has(`${baseTitle} ${index}`.toLowerCase())) {
-      index += 1;
-    }
-    return `${baseTitle} ${index}`;
-  }, [projects]);
-
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, []);
-
-  useEffect(() => {
-    currentProjectIdRef.current = currentProjectId;
-  }, [currentProjectId]);
-
-  useEffect(() => {
-    return () => {
-      for (const timerId of Object.values(paperSessionPersistTimersRef.current)) {
-        window.clearTimeout(timerId);
-      }
-      paperSessionPersistTimersRef.current = {};
-    };
-  }, []);
-
-  useEffect(() => {
-    if (selectedPaper) {
-      return;
-    }
-
-    const pendingScrollTop = pendingSearchScrollTopRef.current;
-    if (pendingScrollTop !== null) {
-      const frameId = window.requestAnimationFrame(() => {
-        searchScrollRef.current?.scrollTo({ top: pendingScrollTop, behavior: 'auto' });
-        pendingSearchScrollTopRef.current = null;
-        previousMessageCountRef.current = messages.length;
-      });
-      return () => window.cancelAnimationFrame(frameId);
-    }
-
-    if (messages.length > previousMessageCountRef.current && hasSearchHistory) {
-      scrollToBottom();
-    }
-    previousMessageCountRef.current = messages.length;
-  }, [hasSearchHistory, messages.length, scrollToBottom, selectedPaper]);
-
-  const openSearchPalette = useCallback((prefill?: string) => {
-    const nextValue = prefill ?? input.trim() ?? '';
-    setPaletteInput(nextValue);
-    runViewTransition(() => {
-      setPreviewPaper(null);
-      setIsComposerFocused(false);
-      setIsPaletteOpen(true);
-    });
-  }, [input]);
-
-  const closeSearchPalette = useCallback(() => {
-    runViewTransition(() => {
-      setIsPaletteOpen(false);
-    });
-  }, []);
-
-  const syncProjectDetailState = useCallback((detail: ProjectDetailResponse) => {
-    setProjectDetail(detail);
-    setChatSessions(buildChatSessionsMap(detail.paper_sessions));
-  }, []);
-
-  const refreshProjectContext = useCallback(async (projectId: string) => {
-    const [projectList, detail] = await Promise.all([listProjects(), fetchProject(projectId)]);
-    setProjects(projectList.projects);
-    syncProjectDetailState(detail);
-    return detail;
-  }, [syncProjectDetailState]);
-
-  const loadCorpusCatalog = useCallback(async () => {
-    try {
-      const response = await fetchCorpusCatalog();
-      setCorpusCatalog(response.corpora);
-      setCatalogError(null);
-    } catch (error) {
-      setCatalogError(error instanceof Error ? error.message : 'Corpus catalog could not be loaded.');
-    }
-  }, []);
-
-  const restoreProjectThread = useCallback(
-    async (thread: ProjectSearchThread, options: { openPaperId?: string | null; closePanel?: boolean } = {}) => {
-      let trace: SearchTrace | null = null;
-      if (thread.trace_id) {
-        try {
-          trace = await fetchTrace(thread.trace_id);
-        } catch {
-          trace = null;
-        }
-      }
-
-      const restoredMessages = buildRestoredSearchMessages(thread, trace);
-      const displayResults = restoredMessages[1]?.results ?? [];
-
-      pendingSearchScrollTopRef.current = 0;
-      runViewTransition(() => {
-        setMessages(restoredMessages);
-        setPreviewPaper(null);
-        setSelectedPaper(null);
-        setActiveThreadId(thread.thread_id);
-      });
-
-      if (options.openPaperId) {
-        const targetPaper = displayResults.find((paper) => paper.paper_id === options.openPaperId) ?? null;
-        if (targetPaper) {
-          runViewTransition(() => {
-            setSelectedPaper(targetPaper);
-          });
-        }
-      }
-
-      if (options.closePanel !== false) {
-        setIsProjectPanelOpen(false);
-      }
-    },
-    [],
-  );
-
-  const loadProjectWorkspace = useCallback(
-    async (requestedProjectId: string | null, options: { restoreLatestThread: boolean } = { restoreLatestThread: true }) => {
-      const requestId = projectLoadRequestRef.current + 1;
-      projectLoadRequestRef.current = requestId;
-      setProjectState('loading');
-      setProjectError(null);
-
-      try {
-        const projectList = await listProjects();
-        if (projectLoadRequestRef.current !== requestId) {
-          return;
-        }
-
-        const availableProjects = projectList.projects;
-        if (availableProjects.length === 0) {
-          setProjects([]);
-          setCurrentProjectId(null);
-          setProjectDetail(null);
-          clearCurrentProjectId();
-          setMessages([]);
-          setPreviewPaper(null);
-          setSelectedPaper(null);
-          setActiveThreadId(null);
-          setProjectState('ready');
-          setProjectError(null);
-          return;
-        }
-
-        const fallbackProjectId = availableProjects[0]!.project_id;
-        const initialProjectId = requestedProjectId ?? loadCurrentProjectId() ?? fallbackProjectId;
-        const resolvedProjectId = availableProjects.some((project) => project.project_id === initialProjectId)
-          ? initialProjectId
-          : fallbackProjectId;
-
-        const detail = await fetchProject(resolvedProjectId);
-        if (projectLoadRequestRef.current !== requestId) {
-          return;
-        }
-
-        setProjects(availableProjects);
-        setCurrentProjectId(resolvedProjectId);
-        saveCurrentProjectId(resolvedProjectId);
-        syncProjectDetailState(detail);
-        setProjectState('ready');
-        setProjectError(null);
-
-        if (options.restoreLatestThread && detail.threads.length > 0) {
-          await restoreProjectThread(detail.threads[0]!, { closePanel: false });
-        } else {
-          setMessages([]);
-          setPreviewPaper(null);
-          setSelectedPaper(null);
-          setActiveThreadId(null);
-        }
-      } catch (error) {
-        if (projectLoadRequestRef.current !== requestId) {
-          return;
-        }
-        setProjectState('error');
-        setProjectError(error instanceof Error ? error.message : 'Workspace could not be loaded.');
-      }
-    },
-    [restoreProjectThread, syncProjectDetailState],
-  );
-
-  const persistProjectThread = useCallback(
-    async (projectId: string, thread: ProjectSearchThread) => {
-      try {
-        await upsertProjectThread(projectId, thread.thread_id, {
-          query: thread.query,
-          trace_id: thread.trace_id,
-          result_counts: thread.result_counts,
-          paper_ids: thread.paper_ids,
-          workspace_scope: thread.workspace_scope,
-          query_scope: thread.query_scope,
-          effective_scope: thread.effective_scope,
-        });
-        if (currentProjectIdRef.current === projectId) {
-          await refreshProjectContext(projectId);
-        }
-      } catch {}
-    },
-    [refreshProjectContext],
-  );
-
-  const persistProjectPaperSession = useCallback(
-    async (projectId: string, session: { paperId: string; paperTitle: string | null; sourceThreadId: string | null; chatHistory: ChatMessage[] }) => {
-      try {
-        const persisted = await upsertProjectPaperSession(projectId, session.paperId, {
-          paper_title: session.paperTitle,
-          source_thread_id: session.sourceThreadId,
-          chat_history: serializeProjectChatHistory(session.chatHistory),
-          last_active_evidence_id: null,
-        });
-        if (currentProjectIdRef.current === projectId) {
-          setProjectDetail((previous) => {
-            if (!previous || previous.project.project_id !== projectId) {
-              return previous;
-            }
-
-            const nextSessions = [
-              persisted,
-              ...previous.paper_sessions.filter((item) => item.paper_id !== persisted.paper_id),
-            ].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
-
-            return {
-              ...previous,
-              project: {
-                ...previous.project,
-                updated_at: persisted.updated_at,
-                paper_session_count: nextSessions.length,
-              },
-              paper_sessions: nextSessions,
-            };
-          });
-          setProjects((previous) =>
-            previous.map((project) =>
-              project.project_id === projectId
-                ? {
-                    ...project,
-                    updated_at: persisted.updated_at,
-                    paper_session_count: Math.max(project.paper_session_count, 1),
-                  }
-                : project,
-            ),
-          );
-        }
-      } catch {}
-    },
-    [],
-  );
-
-  const handleSelectProject = useCallback(async (projectId: string) => {
-    if (isSearching) {
-      return;
-    }
-    await loadProjectWorkspace(projectId, { restoreLatestThread: true });
-    setIsProjectPanelOpen(false);
-  }, [isSearching, loadProjectWorkspace]);
-
-  const handleCreateProject = useCallback(async () => {
-    if (isProjectBusy) {
-      return;
-    }
-    setIsProjectMutating(true);
-    try {
-      const created = await createProject({ title: nextDefaultWorkspaceTitle });
-      await loadProjectWorkspace(created.project_id, { restoreLatestThread: false });
-      setIsProjectPanelOpen(false);
-    } catch (error) {
-      setProjectError(error instanceof Error ? error.message : 'Workspace could not be created.');
-      setProjectState('error');
-    } finally {
-      setIsProjectMutating(false);
-    }
-  }, [isProjectBusy, loadProjectWorkspace, nextDefaultWorkspaceTitle]);
-
-  const ensureWorkspaceForSearch = useCallback(async (): Promise<string> => {
-    if (currentProjectId) {
-      return currentProjectId;
-    }
-
-    const created = await createProject({ title: nextDefaultWorkspaceTitle });
-    const detail = await refreshProjectContext(created.project_id);
-    setCurrentProjectId(created.project_id);
-    saveCurrentProjectId(created.project_id);
-    syncProjectDetailState(detail);
-    return created.project_id;
-  }, [currentProjectId, nextDefaultWorkspaceTitle, refreshProjectContext, syncProjectDetailState]);
-
-  const handleRenameProject = useCallback(async (projectId: string, title: string) => {
-    if (!title.trim() || isProjectBusy) {
-      return;
-    }
-    setIsProjectMutating(true);
-    try {
-      const renamed = await updateProject(projectId, { title: title.trim() });
-      const projectList = await listProjects();
-      setProjects(projectList.projects);
-      setProjectDetail((previous) => {
-        if (!previous || previous.project.project_id !== projectId) {
-          return previous;
-        }
-        return {
-          ...previous,
-          project: renamed,
-        };
-      });
-    } catch (error) {
-      setProjectError(error instanceof Error ? error.message : 'Workspace could not be renamed.');
-      setProjectState('error');
-    } finally {
-      setIsProjectMutating(false);
-    }
-  }, [isProjectBusy]);
-
-  const handleUpdateProjectScope = useCallback(async (projectId: string, selectedCorpora: string[]) => {
-    if (isProjectBusy || isScopeSaving) {
-      return;
-    }
-    setIsScopeSaving(true);
-    try {
-      const updated = await updateProject(projectId, { selected_corpora: selectedCorpora });
-      const projectList = await listProjects();
-      setProjects(projectList.projects);
-      setProjectDetail((previous) => {
-        if (!previous || previous.project.project_id !== projectId) {
-          return previous;
-        }
-        return {
-          ...previous,
-          project: updated,
-        };
-      });
-      setProjectError(null);
-      setProjectState('ready');
-    } catch (error) {
-      setProjectError(error instanceof Error ? error.message : 'Workspace scope could not be updated.');
-      setProjectState('error');
-    } finally {
-      setIsScopeSaving(false);
-    }
-  }, [isProjectBusy, isScopeSaving]);
-
-  const executeClearProject = useCallback(async () => {
-    if (!currentProjectId || isProjectBusy) {
-      return;
-    }
-    setIsProjectMutating(true);
-    try {
-      await clearProject(currentProjectId);
-      await loadProjectWorkspace(currentProjectId, { restoreLatestThread: false });
-      setIsProjectPanelOpen(false);
-    } catch (error) {
-      setProjectError(error instanceof Error ? error.message : 'Workspace could not be cleared.');
-      setProjectState('error');
-    } finally {
-      setIsProjectMutating(false);
-    }
-  }, [currentProjectId, isProjectBusy, loadProjectWorkspace]);
-
-  const executeDeleteProject = useCallback(async () => {
-    if (!currentProjectId || isProjectBusy) {
-      return;
-    }
-    setIsProjectMutating(true);
-    try {
-      await deleteProject(currentProjectId);
-      clearCurrentProjectId();
-      setCurrentProjectId(null);
-      setProjectDetail(null);
-      await loadProjectWorkspace(null, { restoreLatestThread: true });
-      setIsProjectPanelOpen(false);
-    } catch (error) {
-      setProjectError(error instanceof Error ? error.message : 'Workspace could not be deleted.');
-      setProjectState('error');
-    } finally {
-      setIsProjectMutating(false);
-    }
-  }, [currentProjectId, isProjectBusy, loadProjectWorkspace]);
-
-  const handleClearProject = useCallback(() => {
-    if (!currentProjectId || isProjectBusy) {
-      return;
-    }
-    setWorkspaceActionIntent('clear');
-  }, [currentProjectId, isProjectBusy]);
-
-  const handleDeleteProject = useCallback(() => {
-    if (!currentProjectId || isProjectBusy) {
-      return;
-    }
-    setWorkspaceActionIntent('delete');
-  }, [currentProjectId, isProjectBusy]);
-
-  const handleCancelWorkspaceAction = useCallback(() => {
-    if (isProjectMutating) {
-      return;
-    }
-    setWorkspaceActionIntent(null);
-  }, [isProjectMutating]);
-
-  const handleConfirmWorkspaceAction = useCallback(async () => {
-    if (!workspaceActionIntent) {
-      return;
-    }
-    if (workspaceActionIntent === 'clear') {
-      await executeClearProject();
-    } else {
-      await executeDeleteProject();
-    }
-    setWorkspaceActionIntent(null);
-  }, [executeClearProject, executeDeleteProject, workspaceActionIntent]);
-
-  const handleRestoreSavedThread = useCallback(async (thread: ProjectSearchThread) => {
-    await restoreProjectThread(thread);
-  }, [restoreProjectThread]);
-
-  const handleOpenSavedPaperSession = useCallback(
-    async (session: ProjectPaperSession) => {
-      if (!projectDetail || !session.source_thread_id) {
-        return;
-      }
-      const sourceThread = projectDetail.threads.find((thread) => thread.thread_id === session.source_thread_id);
-      if (!sourceThread) {
-        return;
-      }
-      await restoreProjectThread(sourceThread, { openPaperId: session.paper_id });
-    },
-    [projectDetail, restoreProjectThread],
-  );
-
-  useEffect(() => {
-    void loadProjectWorkspace(loadCurrentProjectId(), { restoreLatestThread: true });
-  }, [loadProjectWorkspace]);
-
-  useEffect(() => {
-    void loadCorpusCatalog();
-  }, [loadCorpusCatalog]);
-
-  const handleSearch = useCallback(async (query: string) => {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery || searchInFlightRef.current || searchBlockedReason) {
-      return;
-    }
-    searchInFlightRef.current = true;
-
-    const assistantId = `${Date.now()}-assistant`;
-    const searchStartedAt = Date.now();
-    setActiveSearchRun({
-      assistantId,
-      query: normalizedQuery,
-      status: 'running',
-      currentStage: 'queued',
-      stageMessage: 'Submitting the search job.',
-      progress: null,
-      startedAt: searchStartedAt,
-      stageStartedAt: searchStartedAt,
-    });
-    activeSearchSnapshotRef.current = 'running|queued|Submitting the search job.|none';
-    activeSearchUpdatedAtRef.current = Date.now();
-    setInput('');
-    setIsSearching(true);
-    setPreviewPaper(null);
-
-    try {
-      const targetProjectId = await ensureWorkspaceForSearch();
-      const job = await createSearchJob({ project_id: targetProjectId, query: normalizedQuery, top_k: 15, display_k: 10 });
-      let lastStatus: SearchJobStatus = job;
-      const applyActiveSearchStatus = (status: SearchJobStatus, force = false) => {
-        const snapshot = buildSearchStatusSnapshot(status);
-        const nextSignature = searchStatusSnapshotSignature(snapshot);
-        const now = Date.now();
-        const shouldCommit =
-          force ||
-          nextSignature !== activeSearchSnapshotRef.current ||
-          now - activeSearchUpdatedAtRef.current >= 900;
-
-        if (!shouldCommit) {
-          return;
-        }
-
-        activeSearchSnapshotRef.current = nextSignature;
-        activeSearchUpdatedAtRef.current = now;
-        setActiveSearchRun((previous) => {
-          if (!previous || previous.assistantId !== assistantId) {
-            return previous;
-          }
-          const stageChanged = previous.currentStage !== snapshot.currentStage;
-          return {
-            ...previous,
-            ...snapshot,
-            stageStartedAt: force || stageChanged ? now : previous.stageStartedAt,
-          };
-        });
-      };
-
-      applyActiveSearchStatus(job, true);
-
-      while (lastStatus.status !== 'completed' && lastStatus.status !== 'failed') {
-        await new Promise((resolve) => setTimeout(resolve, 1400));
-        lastStatus = await fetchSearchJob(job.job_id);
-        applyActiveSearchStatus(lastStatus);
-      }
-
-      if (lastStatus.status === 'completed') {
-        const result = await fetchSearchJobResult(job.job_id);
-        const displayPapers = result.display_results;
-        const threadRecord: ProjectSearchThread = {
-          project_id: targetProjectId,
-          thread_id: result.trace_id,
-          query: normalizedQuery,
-          trace_id: result.trace_id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          result_counts: result.counts,
-          paper_ids: displayPapers.map((paper) => paper.paper_id),
-          workspace_scope: result.workspace_scope,
-          query_scope: result.query_scope,
-          effective_scope: result.effective_scope,
-        };
-
-        const userMessage: SearchMessage = {
-          id: `${Date.now()}-user`,
-          role: 'user',
-          content: normalizedQuery,
-        };
-        const resultMessage: SearchMessage = {
-          id: assistantId,
-          role: 'assistant',
-          content: `Search complete. ${displayPapers.length} papers are ready for review.`,
-          status: 'completed',
-          type: 'search_results',
-          results: displayPapers,
-          progress: lastStatus.progress ?? null,
-          traceId: result.trace_id,
-          trace: null,
-          traceState: 'idle',
-          traceError: null,
-          traceOpen: false,
-        };
-
-        setActiveSearchRun((previous) =>
-          previous && previous.assistantId === assistantId
-            ? {
-                ...previous,
-                status: 'completed',
-                currentStage: 'completed',
-                stageMessage: 'Preparing the result view.',
-                progress: {
-                  stage_index: lastStatus.progress?.stage_total ?? lastStatus.progress?.stage_index ?? SEARCH_STAGE_SEQUENCE.length,
-                  stage_total: lastStatus.progress?.stage_total ?? SEARCH_STAGE_SEQUENCE.length,
-                  stage_progress: 1,
-                  overall_progress: 1,
-                  completed_items: lastStatus.progress?.completed_items ?? null,
-                  total_items: lastStatus.progress?.total_items ?? null,
-                },
-                stageStartedAt: Date.now(),
-              }
-            : previous,
-        );
-        await new Promise((resolve) => window.setTimeout(resolve, 420));
-        setActiveSearchRun(null);
-        setMessages((previous) => [...previous, userMessage, resultMessage]);
-        setActiveThreadId(result.trace_id);
-        void persistProjectThread(targetProjectId, threadRecord);
-        return;
-      }
-
-      throw new Error('Search failed.');
-    } catch {
-      const userMessage: SearchMessage = {
-        id: `${Date.now()}-user`,
-        role: 'user',
-        content: normalizedQuery,
-      };
-      const errorMessage: SearchMessage = {
-        id: assistantId,
-        role: 'assistant',
-        content: 'The search did not complete successfully.',
-        status: 'error',
-        progress: null,
-      };
-      setActiveSearchRun(null);
-      setMessages((previous) => [...previous, userMessage, errorMessage]);
-    } finally {
-      searchInFlightRef.current = false;
-      setIsSearching(false);
-      activeSearchSnapshotRef.current = 'none';
-    }
-  }, [ensureWorkspaceForSearch, persistProjectThread, searchBlockedReason]);
-
-  const handleToggleTrace = useCallback(async (messageId: string) => {
-    const message = messages.find((item) => item.id === messageId);
-    if (!message?.traceId) {
-      return;
-    }
-
-    const nextOpenState = !(message.traceOpen ?? false);
-    setMessages((previous) =>
-      previous.map((item) =>
-        item.id === messageId
-          ? {
-              ...item,
-              traceOpen: nextOpenState,
-            }
-          : item,
-      ),
-    );
-
-    if (!nextOpenState || message.traceState === 'loaded' || message.traceState === 'loading') {
-      return;
-    }
-
-    setMessages((previous) =>
-      previous.map((item) =>
-        item.id === messageId
-          ? {
-              ...item,
-              traceState: 'loading',
-              traceError: null,
-            }
-          : item,
-      ),
-    );
-
-    try {
-      const trace = await fetchTrace(message.traceId);
-      setMessages((previous) =>
-        previous.map((item) =>
-          item.id === messageId
-            ? {
-                ...item,
-                trace,
-                traceState: 'loaded',
-                traceError: null,
-              }
-            : item,
-        ),
-      );
-    } catch (error) {
-      setMessages((previous) =>
-        previous.map((item) =>
-          item.id === messageId
-            ? {
-                ...item,
-                traceState: 'error',
-                traceError: error instanceof Error ? error.message : 'Trace details could not be loaded.',
-              }
-            : item,
-        ),
-      );
-    }
-  }, [messages]);
-
-  const handleGlobalSearchSubmit = useCallback((query: string) => {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery || isSearching) {
-      return;
-    }
-
-    runViewTransition(() => {
-      setIsPaletteOpen(false);
-      setPaletteInput('');
-      setPreviewPaper(null);
-      if (selectedPaper) {
-        setSelectedPaper(null);
-      }
-    });
-    void handleSearch(normalizedQuery);
-  }, [handleSearch, isSearching, selectedPaper]);
-
-  const updateChatSession = useCallback((paperId: string, nextMessages: ChatMessage[]) => {
-    setChatSessions((previous) => ({ ...previous, [paperId]: nextMessages }));
-    if (currentProjectId && selectedPaper) {
-      const sessionPayload = {
-        paperId,
-        paperTitle: selectedPaper.title,
-        sourceThreadId: activeThreadId,
-        chatHistory: nextMessages,
-      };
-      const signature = buildProjectSessionSignature(sessionPayload);
-      if (lastPaperSessionPersistSignatureRef.current[paperId] === signature) {
-        return;
-      }
-
-      const existingTimerId = paperSessionPersistTimersRef.current[paperId];
-      if (existingTimerId != null) {
-        window.clearTimeout(existingTimerId);
-      }
-
-      paperSessionPersistTimersRef.current[paperId] = window.setTimeout(() => {
-        lastPaperSessionPersistSignatureRef.current[paperId] = signature;
-        void persistProjectPaperSession(currentProjectId, sessionPayload);
-        delete paperSessionPersistTimersRef.current[paperId];
-      }, 450);
-    }
-  }, [activeThreadId, currentProjectId, persistProjectPaperSession, selectedPaper]);
-
-  const handleQuickPeek = useCallback((paper: PaperResult, threadId?: string | null) => {
-    runViewTransition(() => {
-      setPreviewPaper({ paper, threadId: threadId ?? activeThreadId ?? null });
-    });
-  }, [activeThreadId]);
-
-  const handleOpenPaper = useCallback((paper: PaperResult, threadId?: string | null) => {
-    pendingSearchScrollTopRef.current = searchScrollRef.current?.scrollTop ?? 0;
-    runViewTransition(() => {
-      setPreviewPaper(null);
-      if (threadId) {
-        setActiveThreadId(threadId);
-      }
-      setSelectedPaper(paper);
-    });
-  }, []);
-
-  const handleBackFromPaper = useCallback(() => {
-    runViewTransition(() => {
-      setSelectedPaper(null);
-    });
-  }, []);
-
-  useEffect(() => {
-    const handleWindowKeydown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        openSearchPalette();
-        return;
-      }
-
-      if (event.key === 'Escape' && isPaletteOpen) {
-        event.preventDefault();
-        closeSearchPalette();
-      }
-    };
-
-    window.addEventListener('keydown', handleWindowKeydown);
-    return () => {
-      window.removeEventListener('keydown', handleWindowKeydown);
-    };
-  }, [closeSearchPalette, isPaletteOpen, openSearchPalette]);
-
-  const renderQueryForm = useCallback(
-    (variant: 'hero' | 'dock') => {
-      const isHero = variant === 'hero';
-      const showSuggestions = isComposerFocused && !isSearching;
-
-      return (
-        <div
-          ref={composerRegionRef}
-          onFocusCapture={() => setIsComposerFocused(true)}
-          onBlurCapture={(event) => {
-            const nextTarget = event.relatedTarget;
-            if (nextTarget instanceof Node && composerRegionRef.current?.contains(nextTarget)) {
-              return;
-            }
-            setIsComposerFocused(false);
-          }}
-          className='w-full space-y-4'
-        >
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleSearch(input);
-            }}
-            className={`w-full transition-all duration-300 ${isComposerFocused ? 'relative z-30' : ''}`}
-          >
-            <div
-              className={`relative transition-all duration-300 ${
-                isHero
-                  ? 'rounded-[2.1rem] border border-white/80 bg-white/84 shadow-scholar-lg backdrop-blur-xl'
-                  : 'rounded-[2rem] border border-white/84 bg-white/92 shadow-scholar-lg backdrop-blur-xl'
-              } ${
-                isComposerFocused
-                  ? 'border-indigo-200/90 bg-white shadow-[0_30px_70px_rgba(15,23,42,0.12),0_10px_24px_rgba(79,70,229,0.08)]'
-                  : ''
+}
+
+function RetrievalPicker({ value, onChange }: { value: RetrievalMethod; onChange: (value: RetrievalMethod) => void }) {
+  return (
+    <>
+      <div className="lg:hidden">
+        <SelectControl label="Retrieval" value={value} options={retrievalOptions} onChange={onChange} />
+      </div>
+      <div className="hidden flex-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm lg:grid lg:grid-cols-[0.7fr_0.9fr_0.9fr_1.35fr_1.35fr]">
+        {retrievalOptions.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={`h-10 rounded-lg px-3 text-sm font-semibold transition ${
+                selected ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-500' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
               }`}
+              aria-pressed={selected}
             >
-              <textarea
-                ref={composerTextareaRef}
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                disabled={isSearching || searchBlockedReason != null}
-                rows={isHero ? 4 : 2}
-                placeholder='Ask for papers, datasets, methods, or evidence.'
-                onKeyDown={(event) => {
-                  if (event.nativeEvent.isComposing) {
-                    return;
-                  }
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    void handleSearch(input);
-                  }
-                }}
-                className={`w-full resize-none rounded-[2rem] border-0 bg-transparent pr-20 text-slate-900 outline-none placeholder:text-slate-400 ${
-                  isHero
-                    ? 'min-h-[10.5rem] px-7 py-7 text-[1.04rem] leading-8 sm:text-[1.1rem]'
-                    : 'min-h-[6.9rem] px-6 py-5 text-[0.98rem] leading-7 sm:text-[1.02rem]'
-                }`}
-              />
-              <button
-                type='submit'
-                disabled={isSearching || input.trim().length === 0 || searchBlockedReason != null}
-                className={`absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-full bg-slate-950 text-white transition-all hover:bg-indigo-600 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 ${
-                  isHero ? 'h-12 w-12' : 'h-11 w-11'
-                }`}
-              >
-                {isSearching ? <Loader2 className='h-5 w-5 animate-spin' /> : <Search className='h-5 w-5' />}
-              </button>
+              {option.shortLabel}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
 
-              {isHero ? (
-                <div className='pointer-events-none absolute inset-x-6 bottom-4 flex items-center justify-between text-[0.72rem] font-medium text-slate-400'>
-                  <span>Shift + Enter for a new line</span>
-                  <span>Evidence-aware search</span>
-                </div>
+export default function WorkbenchPage() {
+  const [activeView, setActiveView] = useState('search');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [papers, setPapers] = useState<LibraryPaper[]>([]);
+  const [jobs, setJobs] = useState<LibraryJob[]>([]);
+  const [settings, setSettings] = useState<WorkbenchSettings | null>(null);
+  const [gpuPayload, setGpuPayload] = useState<SystemGpuPayload | null>(null);
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [libraryFilter, setLibraryFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState(sampleQuery);
+  const [retrievalMethod, setRetrievalMethod] = useState<RetrievalMethod>('hybrid_bm25_colbertv2');
+  const [qaDraft, setQaDraft] = useState({ qa_base_url: '', qa_api_key: '', qa_model: 'gpt-5.4-mini', max_context_tokens: 128000, qa_timeout_seconds: 120 });
+  const [llmTest, setLlmTest] = useState<{ ok: boolean; message: string } | null>(null);
+  const [llmTesting, setLlmTesting] = useState(false);
+  const [searchStatus, setSearchStatus] = useState<SearchStatus | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [selectedPaper, setSelectedPaper] = useState<LibraryPaper | null>(null);
+  const [viewer, setViewer] = useState<PaperViewer | null>(null);
+  const [paperViewMode, setPaperViewMode] = useState<'text' | 'pdf'>('text');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, FeedbackDraft>>({});
+  const [chatInput, setChatInput] = useState('What is the paper main idea?');
+  const isPaperThinking = chatMessages.some((message) => message.pending);
+  const [activeEvidenceId, setActiveEvidenceId] = useState<string | null>(null);
+  const [bannerError, setBannerError] = useState<string | null>(null);
+  const [isDraggingUpload, setIsDraggingUpload] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const evidenceRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const paperScrollRef = useRef<HTMLDivElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const showError = useCallback((message: string) => {
+    setBannerError(message);
+  }, []);
+
+  const loadLibrary = useCallback(async () => {
+    const [paperPayload, jobPayload] = await Promise.all([
+      getJson<{ papers: LibraryPaper[] }>('/api/library/papers'),
+      getJson<{ jobs: LibraryJob[] }>('/api/library/jobs'),
+    ]);
+    setPapers(paperPayload.papers);
+    setJobs(jobPayload.jobs);
+    setSelectedPaper((current) => current ?? paperPayload.papers[0] ?? null);
+  }, []);
+
+  const loadSettings = useCallback(async () => {
+    const nextSettings = await getJson<WorkbenchSettings>('/api/settings');
+    setSettings(nextSettings);
+    setRetrievalMethod(nextSettings.retrieval_method);
+    setQaDraft({
+      qa_base_url: nextSettings.qa_base_url,
+      qa_api_key: '',
+      qa_model: nextSettings.qa_model,
+      max_context_tokens: nextSettings.max_context_tokens,
+      qa_timeout_seconds: nextSettings.qa_timeout_seconds,
+    });
+  }, []);
+
+  const loadGpus = useCallback(async () => {
+    setGpuPayload(await getJson<SystemGpuPayload>('/api/system/gpus'));
+  }, []);
+
+  useEffect(() => {
+    void loadLibrary();
+    void loadSettings();
+    void loadGpus();
+  }, [loadGpus, loadLibrary, loadSettings]);
+
+  useEffect(() => {
+    if (!jobs.some((job) => job.status === 'queued' || job.status === 'running')) return;
+    const timer = window.setInterval(() => {
+      void loadLibrary();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [jobs, loadLibrary]);
+
+  useEffect(() => {
+    if (activeView === 'settings') {
+      void loadGpus();
+    }
+  }, [activeView, loadGpus]);
+
+  const uploadFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const pdfs = Array.from(files).filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
+      if (!pdfs.length) {
+        showError('Only PDF files are supported.');
+        return;
+      }
+      try {
+        for (const file of pdfs) {
+          const formData = new FormData();
+          formData.append('file', file, file.name);
+          await getJson('/api/library/upload', { method: 'POST', body: formData });
+        }
+        setBannerError(null);
+        await loadLibrary();
+      } catch (error) {
+        showError(error instanceof Error ? error.message : 'Upload failed.');
+      }
+    },
+    [loadLibrary, showError],
+  );
+
+  useEffect(() => {
+    if (!selectedPaper) return;
+    void getJson<PaperViewer>(`/api/papers/${encodeURIComponent(selectedPaper.paper_id)}/viewer`).then((payload) => {
+      setViewer(payload);
+      setActiveEvidenceId(null);
+    });
+  }, [selectedPaper]);
+
+  const scrollEvidenceIntoView = useCallback((evidenceId: string) => {
+    const node = evidenceRefs.current[evidenceId];
+    const scroller = paperScrollRef.current;
+    if (!node) return;
+    if (!scroller) {
+      node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+    const nodeBox = node.getBoundingClientRect();
+    const scrollerBox = scroller.getBoundingClientRect();
+    const top = scroller.scrollTop + nodeBox.top - scrollerBox.top - Math.max(24, Math.round(scroller.clientHeight * 0.12));
+    scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }, []);
+
+  const jumpToEvidence = useCallback((evidenceId: string) => {
+    setPaperViewMode('text');
+    setActiveEvidenceId(evidenceId);
+    window.setTimeout(() => scrollEvidenceIntoView(evidenceId), 50);
+  }, [scrollEvidenceIntoView]);
+
+  useEffect(() => {
+    if (!activeEvidenceId) return;
+    window.setTimeout(() => scrollEvidenceIntoView(activeEvidenceId), 50);
+  }, [activeEvidenceId, scrollEvidenceIntoView]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }, [chatMessages]);
+
+  const filteredPapers = useMemo(() => {
+    const needle = libraryFilter.trim().toLowerCase();
+    if (!needle) return papers;
+    return papers.filter((paper) => `${paper.title} ${paper.authors.join(' ')}`.toLowerCase().includes(needle));
+  }, [libraryFilter, papers]);
+
+  const visibleJobs = useMemo(() => {
+    const seen = new Set<string>();
+    const unique = jobs.filter((job) => {
+      const key = job.paper_id ?? job.file_name;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const active = unique.filter((job) => job.status === 'queued' || job.status === 'running' || job.status === 'failed');
+    const ready = unique.filter((job) => job.status === 'ready').slice(0, Math.max(0, 5 - active.length));
+    return [...active, ...ready].slice(0, 5);
+  }, [jobs]);
+
+  const visibleEvidenceUnits = useMemo(() => compactEvidenceUnits(viewer?.evidence_units ?? []), [viewer]);
+
+  const columns = useMemo(
+    () => [
+      columnHelper.accessor('title', {
+        header: 'Paper',
+        cell: (info) => (
+          <button className="text-left" onClick={() => setSelectedPaper(info.row.original)}>
+            <span className="block font-semibold text-slate-950">{info.getValue()}</span>
+            <span className="block text-xs text-slate-500">{info.row.original.authors.join(', ')}</span>
+          </button>
+        ),
+      }),
+      columnHelper.accessor('status', { header: 'Status', cell: (info) => <StatusBadge status={info.getValue()} /> }),
+    ],
+    [],
+  );
+
+  const table = useReactTable({
+    data: filteredPapers,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
+
+  const startIndexing = async (retryFailed = false) => {
+    try {
+      await getJson('/api/library/index', {
+        method: 'POST',
+        body: JSON.stringify({ retry_failed: retryFailed }),
+      });
+      setBannerError(null);
+      await loadLibrary();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Indexing service could not be started.');
+    }
+  };
+
+  const runSearch = async () => {
+    setActiveView('search');
+    setSearchResults([]);
+    setBannerError(null);
+    const loadResults = async (jobId: string) => {
+      const result = await getJson<{ results: SearchResult[] }>(`/api/search/jobs/${encodeURIComponent(jobId)}/result`);
+      setSearchResults(result.results);
+      setSelectedPaper(result.results[0] ?? null);
+    };
+    setSearchStatus({
+      job_id: 'starting',
+      status: 'running',
+      stage: 'Starting search',
+      message: 'Preparing the indexed paper library.',
+      progress: 5,
+    });
+    try {
+      const status = await getJson<SearchStatus>('/api/search/jobs', {
+        method: 'POST',
+        body: JSON.stringify({ query: searchQuery, retrieval_method: retrievalMethod, qa_model: settings?.qa_model, corpus_scope: 'ready-papers' }),
+      });
+      setSearchStatus(status);
+      if (status.status === 'failed') {
+        showError(status.message);
+        return;
+      }
+      if (status.status === 'completed') {
+        await loadResults(status.job_id);
+        return;
+      }
+      const timer = window.setInterval(async () => {
+        try {
+          const nextStatus = await getJson<SearchStatus>(`/api/search/jobs/${encodeURIComponent(status.job_id)}`);
+          setSearchStatus(nextStatus);
+          if (nextStatus.status === 'failed') {
+            window.clearInterval(timer);
+            showError(nextStatus.message);
+          }
+          if (nextStatus.status === 'completed') {
+            window.clearInterval(timer);
+            await loadResults(status.job_id);
+          }
+        } catch (error) {
+          window.clearInterval(timer);
+          showError(error instanceof Error ? error.message : 'Search failed.');
+        }
+      }, 500);
+    } catch (error) {
+      setSearchStatus(null);
+      showError(error instanceof Error ? error.message : 'Search failed.');
+    }
+  };
+
+  const askPaper = async () => {
+    if (!selectedPaper || !chatInput.trim() || isPaperThinking) return;
+    const question = chatInput.trim();
+    const userMessage: ChatMessage = { id: makeMessageId('user'), role: 'user', content: question };
+    const assistantMessageId = makeMessageId('assistant');
+    setChatInput('');
+    setChatMessages((messages) => [...messages, userMessage, { id: assistantMessageId, role: 'assistant', content: '', pending: true }]);
+    try {
+      const response = await getJson<ChatMessage & { answer: string; citations: ChatMessage['citations'] }>('/api/chat/paper', {
+        method: 'POST',
+        body: JSON.stringify({ paper_id: selectedPaper.paper_id, query: question }),
+      });
+      setChatMessages((messages) =>
+        messages.map((message) =>
+          message.id === assistantMessageId
+            ? { id: assistantMessageId, role: 'assistant', content: response.answer, citations: response.citations }
+            : message,
+        ),
+      );
+    } catch (error) {
+      setChatMessages((messages) => messages.filter((message) => message.id !== assistantMessageId));
+      showError(error instanceof Error ? error.message : 'Paper QA failed.');
+    }
+  };
+
+  const openDownvotePanel = (message: ChatMessage) => {
+    setFeedbackDrafts((drafts) => ({
+      ...drafts,
+      [message.id]: {
+        open: true,
+        reason: message.feedback?.reason ?? drafts[message.id]?.reason ?? 'incorrect',
+        note: message.feedback?.note ?? drafts[message.id]?.note ?? '',
+        saving: false,
+      },
+    }));
+  };
+
+  const updateFeedbackDraft = (messageId: string, patch: Partial<FeedbackDraft>) => {
+    setFeedbackDrafts((drafts) => ({
+      ...drafts,
+      [messageId]: {
+        reason: patch.reason ?? drafts[messageId]?.reason ?? 'incorrect',
+        note: patch.note ?? drafts[messageId]?.note ?? '',
+        saving: patch.saving ?? drafts[messageId]?.saving ?? false,
+        open: true,
+      },
+    }));
+  };
+
+  const submitFeedback = async (message: ChatMessage, question: string, vote: 'up' | 'down', reason?: FeedbackReason, note = '') => {
+    if (!selectedPaper) return;
+    setFeedbackDrafts((drafts) => ({
+      ...drafts,
+      [message.id]: {
+        open: vote === 'down',
+        reason: reason ?? drafts[message.id]?.reason ?? 'incorrect',
+        note,
+        saving: true,
+      },
+    }));
+    try {
+      const submitted = await getJson<{ feedback: NonNullable<ChatMessage['feedback']> }>('/api/feedback', {
+        method: 'POST',
+        body: JSON.stringify({
+          paper_id: selectedPaper.paper_id,
+          answer_id: message.id,
+          question,
+          vote,
+          reason: vote === 'down' ? reason : null,
+          note: vote === 'down' ? note : '',
+        }),
+      });
+      setChatMessages((messages) =>
+        messages.map((item) => (item.id === message.id ? { ...item, feedback: submitted.feedback } : item)),
+      );
+      setFeedbackDrafts((drafts) => ({
+        ...drafts,
+        [message.id]: {
+          open: false,
+          reason: reason ?? drafts[message.id]?.reason ?? 'incorrect',
+          note,
+          saving: false,
+        },
+      }));
+    } catch (error) {
+      setFeedbackDrafts((drafts) => ({
+        ...drafts,
+        [message.id]: { ...(drafts[message.id] ?? { open: vote === 'down', reason: reason ?? 'incorrect', note, saving: false }), saving: false },
+      }));
+      showError(error instanceof Error ? error.message : 'Feedback could not be saved.');
+    }
+  };
+
+  const saveSettings = async (patch: Partial<WorkbenchSettings>) => {
+    const next = await getJson<WorkbenchSettings>('/api/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+    setSettings(next);
+    return next;
+  };
+
+  const testLlm = async () => {
+    setLlmTesting(true);
+    setLlmTest(null);
+    try {
+      const payload = await getJson<{ ok: boolean; answer?: string; detail?: string }>('/api/settings/test-llm', {
+        method: 'POST',
+        body: JSON.stringify(qaDraft),
+      });
+      setLlmTest({ ok: true, message: payload.answer ?? 'ok' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Connection test failed.';
+      setLlmTest({ ok: false, message });
+      showError(message);
+    } finally {
+      setLlmTesting(false);
+    }
+  };
+
+  const readyCount = papers.filter((paper) => paper.status === 'ready').length;
+  const indexingCount = papers.filter((paper) => paper.status === 'indexing' || paper.status === 'queued').length;
+  const failedCount = papers.filter((paper) => paper.status === 'failed').length;
+  const isSearching = searchStatus?.status === 'running';
+  const pageTitle =
+    { upload: 'Add Papers', library: 'Library', search: 'Search Papers', workspace: 'Workspace', settings: 'Settings' }[activeView] ?? 'Search Papers';
+  const selectedGpuIndexes = new Set(
+    settings?.indexing_device === 'cuda'
+      ? settings.cuda_visible_devices
+          .split(',')
+          .map((item) => Number(item.trim()))
+          .filter(Number.isFinite)
+      : [],
+  );
+  const toggleGpuForIndexing = (gpu: SystemGpu) => {
+    const selected = selectedGpuIndexes.has(gpu.index);
+    if (isGpuBusy(gpu) && !selected) return;
+
+    const next = new Set(selectedGpuIndexes);
+    if (selected) {
+      next.delete(gpu.index);
+    } else {
+      next.add(gpu.index);
+    }
+    const cuda_visible_devices = Array.from(next)
+      .sort((left, right) => left - right)
+      .join(',');
+    void saveSettings({ indexing_device: 'cuda', cuda_visible_devices });
+  };
+
+  return (
+    <main className="min-h-screen bg-[#f6f8fb] text-slate-950">
+      <div className="flex min-h-screen">
+        <aside className={`hidden shrink-0 border-r border-slate-200 bg-white py-6 transition-all duration-200 lg:block ${isSidebarOpen ? 'w-72 px-5' : 'w-20 px-3'}`}>
+          <div className={`mb-8 flex ${isSidebarOpen ? 'items-center justify-between' : 'flex-col items-center gap-3'}`}>
+            <div className={`flex items-center gap-3 ${isSidebarOpen ? '' : 'justify-center'}`}>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                <Layers3 className="h-5 w-5" />
+              </div>
+              {isSidebarOpen ? (
+              <div>
+                <div className="text-lg font-semibold">{APP_NAME}</div>
+              </div>
               ) : null}
             </div>
-          </form>
-
-          {searchBlockedReason ? (
-            <div className="rounded-[1.25rem] border border-amber-200 bg-amber-50 px-4 py-3 text-[0.84rem] leading-6 text-amber-700">
-              {searchBlockedReason}
-            </div>
-          ) : null}
-
-          {!searchBlockedReason && catalogError ? (
-            <div className="rounded-[1.25rem] border border-rose-200 bg-rose-50 px-4 py-3 text-[0.84rem] leading-6 text-rose-700">
-              {catalogError}
-            </div>
-          ) : null}
-
-          {showSuggestions ? (
-            <div className={isHero ? 'relative z-30 psa-fade-up-enter' : 'relative z-30 psa-fade-up-enter'}>
-              <SearchSuggestionPanel
-                variant={variant}
-                onSelect={(query) => {
-                  setInput(query);
-                  setIsComposerFocused(false);
-                  void handleSearch(query);
-                }}
-              />
-            </div>
-          ) : null}
-        </div>
-      );
-    },
-    [catalogError, handleSearch, input, isComposerFocused, isSearching, searchBlockedReason],
-  );
-
-  if (projectState === 'loading' && currentProjectId == null && !projectDetail) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-[#f8fafc] px-6">
-        <div className="rounded-[2rem] border border-slate-200/80 bg-white/92 px-8 py-7 text-center shadow-scholar-lg">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-950 text-white">
-            <Loader2 className="h-5 w-5 animate-spin" />
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen((value) => !value)}
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-950"
+              aria-label={isSidebarOpen ? 'Collapse navigation' : 'Expand navigation'}
+              title={isSidebarOpen ? 'Collapse navigation' : 'Expand navigation'}
+            >
+              {isSidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+            </button>
           </div>
-          <div className="mt-4 text-[0.72rem] font-bold uppercase tracking-[0.22em] text-slate-400">Workspace</div>
-          <div className="mt-2 text-[1rem] font-semibold tracking-tight text-slate-900">Restoring your saved workspace</div>
-        </div>
-      </div>
-    );
-  }
 
-  if (selectedPaper) {
-    return (
-      <div className="h-dvh bg-[#f8fafc]">
-        <SplitPaneWorkspace
-          key={selectedPaper.paper_id}
-          paper={selectedPaper}
-          initialChatHistory={chatSessions[selectedPaper.paper_id] || []}
-          onChatHistoryUpdate={(nextMessages) => updateChatSession(selectedPaper.paper_id, nextMessages)}
-          onBack={handleBackFromPaper}
-          onOpenGlobalSearch={() => openSearchPalette()}
-        />
-        <GlobalSearchPalette
-          open={isPaletteOpen}
-          value={paletteInput}
-          isSearching={isSearching}
-          suggestionGroups={QUERY_SUGGESTION_GROUPS}
-          onChange={setPaletteInput}
-          onClose={closeSearchPalette}
-          onSubmit={handleGlobalSearchSubmit}
-        />
-      </div>
-    );
-  }
+          <nav className="space-y-1">
+            {[
+              ['upload', 'Upload', UploadCloud],
+              ['library', 'Library', Database],
+              ['search', 'Search', Search],
+              ['workspace', 'Workspace', BookOpen],
+              ['settings', 'Settings', Settings],
+            ].map(([id, label, Icon]) => (
+              <button
+                key={id as string}
+                onClick={() => setActiveView(id as string)}
+                className={`flex w-full items-center rounded-xl py-2.5 text-sm font-medium transition ${isSidebarOpen ? 'gap-3 px-3' : 'justify-center px-0'} ${
+                  activeView === id ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
+                }`}
+                title={label as string}
+              >
+                <Icon className="h-4 w-4" />
+                {isSidebarOpen ? label as string : <span className="sr-only">{label as string}</span>}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-  return (
-    <div className={`relative flex min-h-dvh flex-col overflow-x-hidden pt-[5.6rem] text-slate-900 ${isRunningView ? 'bg-[#f6f8fb]' : 'bg-transparent'}`}>
-      <ProjectWorkspacePanel
-        open={isProjectPanelOpen}
-        loading={projectState === 'loading'}
-        disabled={isSearching || isProjectBusy}
-        scopeSaving={isScopeSaving}
-        projects={projects}
-        currentProjectId={currentProjectId}
-        detail={projectDetail}
-        corpusCatalog={corpusCatalog}
-        error={projectError}
-        onClose={() => runViewTransition(() => setIsProjectPanelOpen(false))}
-        onSelectProject={(projectId) => void handleSelectProject(projectId)}
-        onCreateProject={() => void handleCreateProject()}
-        onRenameProject={(projectId, title) => void handleRenameProject(projectId, title)}
-        onUpdateProjectScope={(projectId, selectedCorpora) => void handleUpdateProjectScope(projectId, selectedCorpora)}
-        onClearProject={() => void handleClearProject()}
-        onDeleteProject={() => void handleDeleteProject()}
-        onRestoreThread={(thread) => void handleRestoreSavedThread(thread)}
-        onOpenPaperSession={(session) => void handleOpenSavedPaperSession(session)}
-      />
-      <WorkspaceConfirmDialog
-        open={workspaceActionIntent != null}
-        title={
-          workspaceActionIntent === 'delete'
-            ? `Delete ${currentProjectTitle ?? 'this workspace'}?`
-            : `Clear ${currentProjectTitle ?? 'this workspace'}?`
-        }
-        description={
-          workspaceActionIntent === 'delete'
-            ? 'This removes the saved workspace state itself, including its stored searches and paper chat sessions.'
-            : 'This keeps the workspace, but removes all saved searches and paper chat sessions inside it.'
-        }
-        confirmLabel={workspaceActionIntent === 'delete' ? 'Delete workspace' : 'Clear workspace'}
-        tone={workspaceActionIntent === 'delete' ? 'danger' : 'warning'}
-        busy={isProjectMutating}
-        onCancel={handleCancelWorkspaceAction}
-        onConfirm={() => void handleConfirmWorkspaceAction()}
-      />
-      {!isRunningView ? (
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute left-[-8rem] top-[-9rem] h-[26rem] w-[26rem] rounded-full bg-[radial-gradient(circle,rgba(165,180,252,0.28),rgba(165,180,252,0)_68%)]" />
-          <div className="absolute right-[-10rem] top-[8rem] h-[30rem] w-[30rem] rounded-full bg-[radial-gradient(circle,rgba(186,230,253,0.28),rgba(186,230,253,0)_68%)]" />
-          <div className="absolute bottom-[-12rem] left-1/2 h-[26rem] w-[40rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(226,232,240,0.42),rgba(226,232,240,0)_72%)]" />
-        </div>
-      ) : null}
-      {isComposerFocused ? (
-        <div className='pointer-events-none absolute inset-0 z-20 bg-[linear-gradient(180deg,rgba(15,23,42,0.06),rgba(15,23,42,0.14))] backdrop-blur-[2px]' />
-      ) : null}
+        <section className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 px-5 py-4 backdrop-blur lg:px-8">
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-950">{pageTitle}</h1>
+          </header>
 
-      <header className={`${isRunningView ? 'border-b border-slate-200/70 bg-white/92' : 'glass-header'} fixed inset-x-0 top-0 z-50`}>
-        <div className="mx-auto flex w-full max-w-[1440px] items-center justify-between px-5 py-4 sm:px-8">
-          <div className="flex items-center gap-4">
-            <ActivityMark
-              mode={headerActivityMode}
-              label={headerActivityMode === 'active' ? 'Searching' : headerActivityMode === 'done' ? 'Ready' : null}
-              layout="stacked"
-              size="lg"
-              minimal={isRunningView}
-            />
-            <div>
-              <div className="text-[0.95rem] font-black tracking-tight text-slate-950">{APP_NAME}</div>
-              <div className="text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-slate-400">{APP_TAGLINE}</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            {currentProjectId ? (
-              <div className={`hidden max-w-[18rem] truncate rounded-full border px-4 py-2 text-[0.66rem] font-bold uppercase tracking-[0.16em] text-slate-500 xl:inline-flex ${isRunningView ? 'border-slate-200 bg-white shadow-none' : 'border-white/75 bg-white/80 shadow-scholar-sm backdrop-blur-xl'}`}>
-                {scopeSummary}
+          <div className="flex-1 px-5 py-6 lg:px-8">
+            {bannerError ? (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-5 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="workbench-error-title">
+                <div className="w-full max-w-md rounded-3xl border border-rose-100 bg-white p-5 shadow-2xl">
+                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
+                    <AlertCircle className="h-5 w-5" />
+                  </div>
+                  <h2 id="workbench-error-title" className="text-lg font-semibold text-slate-950">Action failed</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{bannerError}</p>
+                  <div className="mt-5 flex justify-end">
+                    <button type="button" onClick={() => setBannerError(null)} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">Dismiss</button>
+                  </div>
+                </div>
               </div>
             ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                if (!hasWorkspaces) {
-                  void handleCreateProject();
-                  return;
-                }
-                runViewTransition(() => setIsProjectPanelOpen(true));
-              }}
-              className={`inline-flex items-center gap-3 rounded-full border px-4 py-2 text-[0.72rem] font-bold uppercase tracking-[0.18em] text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 ${isRunningView ? 'border-slate-200 bg-white shadow-none' : 'border-white/75 bg-white/80 shadow-scholar-sm backdrop-blur-xl'}`}
-            >
-              {hasWorkspaces ? <FolderOpen className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-              <span className="max-w-[10rem] truncate">{hasWorkspaces ? currentProjectTitle : 'Create workspace'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => openSearchPalette()}
-              className={`inline-flex items-center gap-3 rounded-full border px-4 py-2 text-[0.72rem] font-bold uppercase tracking-[0.18em] text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 ${isRunningView ? 'border-slate-200 bg-white shadow-none' : 'border-white/75 bg-white/80 shadow-scholar-sm backdrop-blur-xl'}`}
-            >
-              <Search className="h-3.5 w-3.5" />
-              Search
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[0.64rem] text-slate-400">
-                ⌘K
-              </span>
-            </button>
-          </div>
-        </div>
-        {!isRunningView ? (
-          <div
-            className={`header-status-rail ${
-              headerActivityMode === 'active'
-                ? 'header-status-rail--active'
-                : headerActivityMode === 'done'
-                  ? 'header-status-rail--done'
-                  : ''
-            }`}
-          />
-        ) : null}
-      </header>
+            <Tabs.Root value={activeView} onValueChange={setActiveView}>
+              <Tabs.List className="mb-5 flex gap-2 overflow-x-auto lg:hidden">
+                {['upload', 'library', 'search', 'workspace', 'settings'].map((id) => (
+                  <Tabs.Trigger key={id} value={id} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm capitalize data-[state=active]:bg-slate-950 data-[state=active]:text-white">
+                    {id}
+                  </Tabs.Trigger>
+                ))}
+              </Tabs.List>
 
-      {!hasThreadView ? (
-          <main
-            key="hero"
-            className="psa-main-switch relative z-30 flex flex-1 items-center"
-          >
-            <div className="mx-auto flex w-full max-w-[1440px] flex-1 items-center px-5 py-10 sm:px-8">
-              <section className="mx-auto w-full max-w-[1040px] text-center">
-                <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-white/86 px-4 py-2 text-[0.68rem] font-bold uppercase tracking-[0.24em] text-indigo-600 shadow-scholar-sm backdrop-blur-xl">
-                  <span className="h-2 w-2 rounded-full bg-indigo-500" />
-                  Scholar-grade retrieval
-                </div>
+              <Tabs.Content value="upload" className="outline-none">
+                <div className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
+                  <section
+                    className={`flex min-h-[260px] flex-col items-center justify-center rounded-3xl border border-dashed bg-white p-8 text-center shadow-sm transition ${
+                      isDraggingUpload ? 'border-blue-400 bg-blue-50' : 'border-slate-300'
+                    }`}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      setIsDraggingUpload(true);
+                    }}
+                    onDragLeave={() => setIsDraggingUpload(false)}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setIsDraggingUpload(false);
+                      void uploadFiles(event.dataTransfer.files);
+                    }}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => {
+                        if (event.target.files) void uploadFiles(event.target.files);
+                        event.currentTarget.value = '';
+                      }}
+                    />
+                    <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                      <UploadCloud className="h-6 w-6" />
+                    </div>
+                    <h2 className="text-xl font-semibold text-slate-950">Add PDF papers</h2>
+                    <p className="mt-2 text-sm text-slate-500">Drag files here, or choose PDFs from your computer.</p>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="mt-6 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    >
+                      Browse PDFs
+                    </button>
+                  </section>
 
-                <h1 className="mt-8 text-[clamp(3.2rem,8vw,6.4rem)] font-black tracking-[-0.075em] text-slate-950">
-                  Search papers with
-                  <span className="block text-indigo-600">scholarly precision.</span>
-                </h1>
-
-                <p className="font-scholar mx-auto mt-6 max-w-[760px] text-[1.16rem] italic leading-8 text-slate-500 sm:text-[1.32rem]">
-                  A cleaner interface for finding relevant papers, opening the right manuscript, and following the evidence all the way into the paper itself.
-                </p>
-
-                <div className="mx-auto mt-12 max-w-[900px]">{renderQueryForm('hero')}</div>
-
-                {!isComposerFocused ? (
-                  <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-                    {SAMPLE_QUERIES.map((query) => (
-                      <button
-                        key={query}
-                        type="button"
-                        onClick={() => setInput(query)}
-                        className="rounded-full border border-white/70 bg-white/72 px-4 py-2 text-[0.82rem] font-medium text-slate-600 shadow-scholar-sm backdrop-blur-xl transition hover:border-indigo-200 hover:bg-white hover:text-indigo-600"
-                      >
-                        {query}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </section>
-            </div>
-          </main>
-        ) : isRunningView && activeSearchRun ? (
-          <SearchRunningPreview run={activeSearchRun} />
-        ) : (
-          <div
-            key="thread"
-            className="psa-main-switch relative z-30 flex flex-1 flex-col"
-          >
-            <main ref={searchScrollRef} className="custom-scrollbar flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-[1440px] px-5 pb-12 pt-10 sm:px-8">
-                <div className="mx-auto max-w-[1220px] space-y-8">
-                  {messages.map((message) => {
-                    const isSearchResultMessage = message.type === 'search_results' && !!message.results;
-
-                    if (isSearchResultMessage) {
-                      return (
-                        <section key={message.id} className="flex justify-center">
-                          <div className="w-full max-w-[1180px]">
-                            <div className="space-y-5">
-                              <div className="assistant-answer-ready overflow-hidden rounded-[1.9rem] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,249,252,0.96))] px-6 py-5 shadow-[0_22px_60px_rgba(15,23,42,0.08)]">
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="min-w-0 flex items-center gap-3">
-                                    <ActivityMark mode="done" label={null} layout="inline" size="md" />
-                                    <div className="min-w-0">
-                                      <div className="text-[0.68rem] font-bold uppercase tracking-[0.22em] text-indigo-500">
-                                        {getSearchResultHeadline(message)}
-                                      </div>
-                                      <div className="mt-1 text-[1.08rem] font-semibold tracking-tight text-slate-950">
-                                        {message.content}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="hidden rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500 sm:inline-flex">
-                                    Ready for review
-                                  </div>
-                                </div>
+                  <section className="space-y-4">
+                    <div className="grid grid-cols-3 gap-3">
+                      <MetricCard label="Ready" value={readyCount} icon={CheckCircle2} />
+                      <MetricCard label="Indexing" value={indexingCount} icon={Loader2} />
+                      <MetricCard label="Failed" value={failedCount} icon={AlertCircle} />
+                    </div>
+                    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4 flex items-center justify-between">
+                        <div>
+                          <h3 className="font-semibold">Recent activity</h3>
+                        </div>
+                        <button onClick={() => void startIndexing(failedCount > 0)} aria-label="Start or retry indexing" className="rounded-full border border-slate-200 p-2 text-slate-500 hover:bg-slate-100">
+                          <RefreshCw className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {visibleJobs.length ? visibleJobs.map((job) => (
+                          <div key={job.job_id} className="rounded-2xl border border-slate-200 p-3">
+                            <div className="mb-2 flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium text-slate-950">{job.file_name}</div>
+                                {job.status === 'failed' ? <div className="mt-1 text-xs text-rose-600">{job.message}</div> : null}
+                                {job.status === 'queued' || job.status === 'running' ? <div className="mt-1 text-xs text-slate-500">{job.message}</div> : null}
                               </div>
-
-                              <SearchTracePanel
-                                message={message}
-                                onToggle={() => void handleToggleTrace(message.id)}
-                              />
-
-                              <SearchResultRevealGrid
-                                papers={message.results ?? []}
-                                traceId={message.traceId ?? null}
-                                onOpenPaper={handleOpenPaper}
-                                onQuickPeek={handleQuickPeek}
-                              />
+                              <StatusBadge status={job.status} />
                             </div>
+                            {job.status === 'queued' || job.status === 'running' ? (
+                              <Progress.Root value={job.progress} className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                                <Progress.Indicator className="h-full rounded-full bg-slate-950 transition-transform" style={{ transform: `translateX(-${100 - job.progress}%)` }} />
+                              </Progress.Root>
+                            ) : null}
                           </div>
-                        </section>
-                      );
-                    }
+                        )) : <div className="rounded-2xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">No recent indexing activity.</div>}
+                        {jobs.length > visibleJobs.length ? (
+                          <div className="pt-1 text-center text-xs text-slate-400">{jobs.length - visibleJobs.length} older items hidden</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </Tabs.Content>
 
-                    return (
-                      <section
-                        key={message.id}
-                        className="flex justify-center"
+              <Tabs.Content value="library" className="outline-none">
+                <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-5 flex justify-end">
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <Filter className="h-4 w-4 text-slate-400" />
+                      <input value={libraryFilter} onChange={(event) => setLibraryFilter(event.target.value)} id="library-filter" name="library-filter" placeholder="Search title or author" className="w-72 bg-transparent text-sm outline-none" />
+                    </div>
+                  </div>
+                  <div className="overflow-hidden rounded-2xl border border-slate-200">
+                    <table className="w-full border-collapse text-sm">
+                      <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.12em] text-slate-500">
+                        {table.getHeaderGroups().map((headerGroup) => (
+                          <tr key={headerGroup.id}>
+                            {headerGroup.headers.map((header) => (
+                              <th key={header.id} className="border-b border-slate-200 px-4 py-3 font-semibold">
+                                {flexRender(header.column.columnDef.header, header.getContext())}
+                              </th>
+                            ))}
+                          </tr>
+                        ))}
+                      </thead>
+                      <tbody>
+                        {table.getRowModel().rows.map((row) => (
+                          <tr key={row.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                            {row.getVisibleCells().map((cell) => (
+                              <td key={cell.id} className="px-4 py-3 align-top">
+                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </Tabs.Content>
+
+              <Tabs.Content value="search" className="outline-none">
+                <div className="mx-auto max-w-5xl space-y-5">
+                  <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <textarea
+                      id="paper-search-query"
+                      name="paper-search-query"
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      className="min-h-48 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 outline-none transition focus:border-blue-500 focus:bg-white"
+                    />
+                    <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-end">
+                      <RetrievalPicker value={retrievalMethod} onChange={setRetrievalMethod} />
+                      <button
+                        onClick={runSearch}
+                        disabled={isSearching || !searchQuery.trim()}
+                        className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400 lg:w-44"
                       >
-                        <div className="w-full max-w-[1180px]">
-                          <div className="min-w-0 flex-1 space-y-5">
-                            <div
-                              className={`rounded-[2rem] border px-6 py-5 ${
-                                message.role === 'user'
-                                  ? 'ml-auto w-fit max-w-[min(100%,52rem)] border-slate-200/80 bg-white/86 text-slate-900 shadow-scholar-lg backdrop-blur-xl'
-                                  : 'mr-auto w-fit max-w-[min(100%,54rem)] border-slate-200/90 bg-white/90 text-slate-700 shadow-scholar-lg backdrop-blur-xl'
-                              }`}
-                            >
-                              <div className="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.24em] text-slate-400">
-                                {message.role === 'user' ? 'Query' : 'Search system'}
-                              </div>
+                        {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                        {isSearching ? 'Searching' : 'Run search'}
+                      </button>
+                    </div>
+                    {searchStatus && searchStatus.status !== 'completed' ? (
+                      <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
+                        <div className="mb-2 flex items-center justify-between text-sm">
+                          <span className="font-medium text-slate-900">{searchStatus.stage}</span>
+                          <span className="text-slate-500">{searchStatus.job_id === 'starting' ? 'running' : `${searchStatus.progress}%`}</span>
+                        </div>
+                        <Progress.Root value={searchStatus.progress} className="h-2 overflow-hidden rounded-full bg-slate-100">
+                          <Progress.Indicator
+                            className={`h-full rounded-full bg-blue-600 ${searchStatus.job_id === 'starting' ? 'animate-pulse' : 'transition-transform'}`}
+                            style={{ transform: searchStatus.job_id === 'starting' ? 'none' : `translateX(-${100 - searchStatus.progress}%)` }}
+                          />
+                        </Progress.Root>
+                        <p className="mt-2 text-xs text-slate-500">{searchStatus.message}</p>
+                      </div>
+                    ) : null}
+                  </section>
 
+                  <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="mb-4 flex items-center justify-between">
+                      <div>
+                        <h2 className="text-lg font-semibold">Results</h2>
+                      </div>
+                      <PanelRightOpen className="h-5 w-5 text-slate-400" />
+                    </div>
+                    <div className="space-y-3">
+                      {searchResults.length ? searchResults.map((paper) => (
+                        <article key={paper.paper_id} className="rounded-2xl border border-slate-200 p-4 transition hover:border-slate-300 hover:shadow-sm">
+                          <div className="flex flex-col gap-4 md:flex-row">
+                            <PaperPreview imageUrl={paper.preview_image_url} />
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-2 flex flex-wrap items-center gap-2">
+                                <span className="rounded-full bg-slate-950 px-2.5 py-1 text-xs font-semibold text-white">#{paper.rank}</span>
+                              </div>
+                              <h3 className="text-base font-semibold leading-6 text-slate-950">{paper.title}</h3>
+                              <p className="mt-1 text-sm text-slate-500">{paper.authors.join(', ')}</p>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setSelectedPaper(paper);
+                                setActiveView('workspace');
+                              }}
+                              className="h-10 shrink-0 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                            >
+                              Read paper
+                            </button>
+                          </div>
+                        </article>
+                      )) : (
+                        <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
+Run search to show ranked papers.
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+              </Tabs.Content>
+
+              <Tabs.Content value="workspace" className="outline-none">
+                <div data-workspace-layout="true" className="grid min-h-[720px] gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
+                  <aside className="flex min-h-[680px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-24 lg:max-h-[calc(100vh-7.5rem)]">
+                    <div className="flex-1 space-y-4 overflow-y-auto p-5">
+                      {chatMessages.length ? (
+                        <>
+                          {chatMessages.map((message, index) => {
+                            const question = questionForAssistant(chatMessages, index);
+                            const feedbackDraft = feedbackDrafts[message.id];
+                            return (
                               <div
-                                className={`${
+                                key={message.id}
+                                className={`rounded-2xl p-4 text-sm leading-6 ${
                                   message.role === 'user'
-                                    ? 'font-scholar text-[1.18rem] italic leading-9 text-slate-700'
-                                    : 'text-[1rem] leading-8'
+                                    ? 'ml-10 bg-slate-950 text-white'
+                                    : 'mr-4 border border-slate-200 bg-slate-50 text-slate-700'
                                 }`}
                               >
-                                {message.content}
+                                {message.pending ? (
+                                  <div className="flex items-center gap-3">
+                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm">
+                                      <Brain className="h-4 w-4" />
+                                    </span>
+                                    <span className="flex items-center gap-1" aria-label="Assistant is thinking">
+                                      <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '-0.2s' }} />
+                                      <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '-0.1s' }} />
+                                      <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400" />
+                                    </span>
+                                  </div>
+                                ) : (
+                                  message.content
+                                )}
+                                {message.citations?.length ? (
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    {message.citations.map((citation) => (
+                                      <button
+                                        key={citation.evidence_id}
+                                        onClick={() => jumpToEvidence(citation.evidence_id)}
+                                        className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-sm"
+                                      >
+                                        <Quote className="h-3 w-3" />{' '}
+                                        {isGenericEvidenceHeading(citation.section_path[0])
+                                          ? `pp. ${citation.page_start}-${citation.page_end}`
+                                          : `${citation.section_path[0]} pp. ${citation.page_start}-${citation.page_end}`}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {message.role === 'assistant' && !message.pending ? (
+                                  <div className="mt-3 border-t border-slate-200 pt-3">
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        aria-label="Mark this answer as helpful"
+                                        onClick={() => void submitFeedback(message, question, 'up')}
+                                        className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition ${
+                                          message.feedback?.vote === 'up'
+                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                            : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-950'
+                                        }`}
+                                      >
+                                        <ThumbsUp className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        aria-label="Mark this answer as not helpful"
+                                        onClick={() => openDownvotePanel(message)}
+                                        className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition ${
+                                          message.feedback?.vote === 'down'
+                                            ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                            : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-950'
+                                        }`}
+                                      >
+                                        <ThumbsDown className="h-4 w-4" />
+                                      </button>
+                                      {message.feedback ? (
+                                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-slate-500">
+                                          <CheckCircle2 className="h-3.5 w-3.5" /> Submitted
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    {feedbackDraft?.open ? (
+                                      <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                                        <div className="grid grid-cols-2 gap-2">
+                                          {feedbackReasons.map((reason) => (
+                                            <button
+                                              key={reason.value}
+                                              type="button"
+                                              onClick={() => updateFeedbackDraft(message.id, { reason: reason.value })}
+                                              className={`rounded-xl border px-3 py-2 text-left text-xs font-medium transition ${
+                                                feedbackDraft.reason === reason.value
+                                                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                                              }`}
+                                            >
+                                              {reason.label}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <textarea
+                                          id={`feedback-note-${message.id}`}
+                                          name={`feedback-note-${message.id}`}
+                                          aria-label="Optional feedback note"
+                                          value={feedbackDraft.note}
+                                          onChange={(event) => updateFeedbackDraft(message.id, { note: event.target.value })}
+                                          placeholder="Add a note (optional)"
+                                          className="mt-2 min-h-16 w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-xs leading-5 outline-none focus:border-blue-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          disabled={feedbackDraft.saving}
+                                          onClick={() => void submitFeedback(message, question, 'down', feedbackDraft.reason, feedbackDraft.note)}
+                                          className="mt-2 flex h-9 w-full items-center justify-center rounded-xl bg-slate-950 px-3 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:bg-slate-400"
+                                        >
+                                          {feedbackDraft.saving ? 'Submitting' : 'Submit'}
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                               </div>
-                            </div>
-                          </div>
+                            );
+                          })}
+                        </>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-slate-200 p-5 text-sm leading-6 text-slate-500">
+                          Ask a question about this paper.
                         </div>
-                      </section>
-                    );
-                  })}
-                  <div ref={messagesEndRef} />
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+
+                    <div className="border-t border-slate-200 p-4">
+                      <textarea
+                        id="paper-chat-question"
+                        name="paper-chat-question"
+                        value={chatInput}
+                        onChange={(event) => setChatInput(event.target.value)}
+                        className="mb-3 min-h-24 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 outline-none transition focus:border-blue-500 focus:bg-white"
+                      />
+                      <button
+                        onClick={askPaper}
+                        disabled={isPaperThinking || !chatInput.trim() || !selectedPaper}
+                        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                      >
+                        {isPaperThinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
+                        {isPaperThinking ? 'Thinking' : 'Ask paper'}
+                      </button>
+                    </div>
+                  </aside>
+
+                  <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+                      <h2 className="min-w-0 text-xl font-semibold leading-7 text-slate-950">{viewer?.title ?? selectedPaper?.title ?? 'Select a paper'}</h2>
+                      <div className="flex shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-1">
+                        {(['text', 'pdf'] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setPaperViewMode(mode)}
+                            className={`h-8 rounded-lg px-3 text-sm font-semibold ${paperViewMode === mode ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-950'}`}
+                          >
+                            {mode === 'text' ? 'Text' : 'PDF'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div ref={paperScrollRef} data-paper-scroll="true" className="max-h-[calc(100vh-10rem)] min-h-[620px] overflow-y-auto bg-[#fffdf8] px-5 py-6">
+                      {paperViewMode === 'pdf' && (viewer?.paper_id || selectedPaper?.paper_id) ? (
+                        <PaperPdfViewer
+                          pdfUrl={`/api/papers/${encodeURIComponent(viewer?.paper_id ?? selectedPaper?.paper_id ?? '')}/pdf`}
+                          scrollContainerRef={paperScrollRef}
+                        />
+                      ) : (
+                        <div className="mx-auto max-w-3xl">
+                          {visibleEvidenceUnits.length ? (
+                            visibleEvidenceUnits.map((unit, index) => (
+                              <div
+                                key={`${unit.evidence_id}-${unit.page_start}-${unit.page_end}-${index}`}
+                                data-evidence-card="true"
+                                ref={(node) => {
+                                  evidenceRefs.current[unit.evidence_id] = node;
+                                  unit.aliasEvidenceIds.forEach((evidenceId) => {
+                                    evidenceRefs.current[evidenceId] = node;
+                                  });
+                                }}
+                                className={`mb-4 rounded-2xl border p-4 transition ${
+                                  activeEvidenceId === unit.evidence_id || unit.aliasEvidenceIds.includes(activeEvidenceId ?? '')
+                                    ? 'border-blue-300 bg-blue-50/70 ring-4 ring-blue-100'
+                                    : 'border-slate-200 bg-white'
+                                }`}
+                              >
+                                <div className="mb-2 flex items-center justify-between gap-3">
+                                  {isGenericEvidenceHeading(unit.heading) ? (
+                                    <div />
+                                  ) : (
+                                    <h3 className="font-semibold text-slate-950">{unit.heading}</h3>
+                                  )}
+                                  <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500">pp. {unit.page_start}-{unit.page_end}</span>
+                                </div>
+                                <EvidenceUnitBody unit={unit} />
+                              </div>
+                            ))
+                          ) : (
+                            <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+                              No parsed paper content available.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </section>
                 </div>
-              </div>
-            </main>
+              </Tabs.Content>
 
-            <footer className="glass-header sticky bottom-0 z-30 border-t border-white/70">
-              <div className="mx-auto w-full max-w-[1440px] px-5 py-4 sm:px-8">
-                <div className="mx-auto max-w-[1080px]">{renderQueryForm('dock')}</div>
-              </div>
-            </footer>
+              <Tabs.Content value="settings" className="outline-none">
+                <div className="max-w-5xl space-y-5">
+                  <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 className="mb-5 text-lg font-semibold">Paper indexing</h2>
+                    <div className="max-w-md">
+                      <SelectControl
+                        label="Indexing device"
+                        value={settings?.indexing_device ?? 'auto'}
+                        options={indexingDeviceOptions}
+                        onChange={(indexing_device) => void saveSettings({ indexing_device })}
+                      />
+                    </div>
+                    <div className="mt-5 flex items-center justify-between">
+                      <div className="text-sm font-semibold text-slate-950">Detected GPUs</div>
+                      <button aria-label="Refresh GPUs" onClick={loadGpus} className="rounded-full border border-slate-200 p-2 text-slate-500 hover:bg-slate-100">
+                        <RefreshCw className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {gpuPayload?.gpus.length ? (
+                        gpuPayload.gpus.map((gpu) => (
+                          <button
+                            key={gpu.index}
+                            type="button"
+                            disabled={isGpuBusy(gpu) && !selectedGpuIndexes.has(gpu.index)}
+                            onClick={() => toggleGpuForIndexing(gpu)}
+                            className={`rounded-2xl border p-4 text-left transition ${
+                              selectedGpuIndexes.has(gpu.index)
+                                ? 'border-blue-300 bg-blue-50/40'
+                                : 'border-slate-200 bg-white hover:border-slate-300'
+                            } disabled:cursor-not-allowed disabled:hover:border-slate-200`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="font-semibold text-slate-950">GPU {gpu.index}</div>
+                                <div className="text-sm text-slate-500">{gpu.name}</div>
+                              </div>
+                              <GpuState gpu={gpu} selected={selectedGpuIndexes.has(gpu.index)} />
+                            </div>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="rounded-2xl border border-slate-200 p-4 text-sm text-slate-500">No NVIDIA GPU detected.</div>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 className="mb-5 text-lg font-semibold">Paper QA provider</h2>
+                    <form className="grid gap-4 md:grid-cols-2" onSubmit={(event) => event.preventDefault()}>
+                      <label className="block md:col-span-2">
+                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Base URL</span>
+                        <input id="qa-base-url" name="qa-base-url" value={qaDraft.qa_base_url} onChange={(event) => setQaDraft({ ...qaDraft, qa_base_url: event.target.value })} placeholder="http://127.0.0.1:8017/v1" className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none" />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Model ID</span>
+                        <input id="qa-model-id" name="qa-model-id" value={qaDraft.qa_model} onChange={(event) => setQaDraft({ ...qaDraft, qa_model: event.target.value })} className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none" />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Max context tokens</span>
+                        <input id="qa-max-context-tokens" name="qa-max-context-tokens" type="number" value={qaDraft.max_context_tokens} onChange={(event) => setQaDraft({ ...qaDraft, max_context_tokens: Number(event.target.value) || 128000 })} className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none" />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">QA timeout seconds</span>
+                        <input id="qa-timeout-seconds" name="qa-timeout-seconds" type="number" min={5} value={qaDraft.qa_timeout_seconds} onChange={(event) => setQaDraft({ ...qaDraft, qa_timeout_seconds: Number(event.target.value) || 120 })} className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none" />
+                      </label>
+                      <label className="block md:col-span-2">
+                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">API key</span>
+                        <input id="qa-api-key" name="qa-api-key" type="password" autoComplete="off" value={qaDraft.qa_api_key} onChange={(event) => setQaDraft({ ...qaDraft, qa_api_key: event.target.value })} placeholder={settings?.qa_api_key_set ? 'Saved' : 'Optional for local vLLM'} className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none" />
+                      </label>
+                    </form>
+                    <div className="mt-5 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await saveSettings(qaDraft);
+                            setQaDraft({ ...qaDraft, qa_api_key: '' });
+                            setLlmTest({ ok: true, message: 'Saved' });
+                          } catch (error) {
+                            showError(error instanceof Error ? error.message : 'Settings could not be saved.');
+                          }
+                        }}
+                        className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+                      >
+                        Save provider
+                      </button>
+                      <button type="button" onClick={testLlm} disabled={llmTesting} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:text-slate-400">
+                        {llmTesting ? 'Testing...' : 'Test connection'}
+                      </button>
+                      {llmTest ? <span className={`text-sm font-medium ${llmTest.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{llmTest.message}</span> : null}
+                    </div>
+                  </section>
+
+                  <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 className="mb-5 text-lg font-semibold">Workspace</h2>
+                    <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 p-4">
+                      <div className="text-sm font-semibold text-slate-950">Citation navigation</div>
+                      <Switch.Root checked={settings?.enable_citations ?? true} onCheckedChange={(enable_citations) => void saveSettings({ enable_citations })} className="relative h-7 w-12 rounded-full bg-slate-200 data-[state=checked]:bg-slate-950">
+                        <Switch.Thumb className="block h-6 w-6 translate-x-0.5 rounded-full bg-white shadow transition data-[state=checked]:translate-x-[22px]" />
+                      </Switch.Root>
+                    </div>
+                  </section>
+                </div>
+              </Tabs.Content>
+            </Tabs.Root>
           </div>
-        )}
-
-      <QuickPeekPanel
-        paper={previewPaper?.paper ?? null}
-        onClose={() => runViewTransition(() => setPreviewPaper(null))}
-        onOpenPaper={(paper) => handleOpenPaper(paper, previewPaper?.threadId ?? null)}
-      />
-      <GlobalSearchPalette
-        open={isPaletteOpen}
-        value={paletteInput}
-        isSearching={isSearching}
-        suggestionGroups={QUERY_SUGGESTION_GROUPS}
-        onChange={setPaletteInput}
-        onClose={closeSearchPalette}
-        onSubmit={handleGlobalSearchSubmit}
-      />
-    </div>
+        </section>
+      </div>
+    </main>
   );
 }

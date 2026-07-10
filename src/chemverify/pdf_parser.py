@@ -40,7 +40,7 @@ _REFERENCE_SECTION_PATTERN = re.compile(
 )
 _TEXT_BLOCK_TYPES = {"text", "list"}
 _TABLE_BLOCK_TYPES = {"table"}
-_FIGURE_BLOCK_TYPES = {"image", "figure"}
+_FIGURE_BLOCK_TYPES = {"image", "figure", "chart"}
 _EQUATION_BLOCK_TYPES = {"equation", "formula", "interline_equation", "inline_equation"}
 _SKIP_BLOCK_TYPES = {
     "discarded",
@@ -358,6 +358,7 @@ class MinerULayoutV2Parser(BasePDFParser):
         objects: list[ObjectRecord] = []
         section_stack: list[tuple[int, str]] = []
         current_section: _SectionAccumulator | None = None
+        pending_objects: list[ObjectRecord] = []
         document_title_consumed = False
         object_ordinal = 0
         reference_reached = False
@@ -391,6 +392,20 @@ class MinerULayoutV2Parser(BasePDFParser):
                     if self._is_reference_heading(heading_text):
                         reference_reached = True
                         break
+                    if pending_objects and not section_accumulators:
+                        pending_section = self._start_section(
+                            paper.paper_id,
+                            section_accumulators,
+                            section_stack,
+                            "Document",
+                            pending_objects[0].page_idx,
+                        )
+                        for pending in pending_objects:
+                            pending.section_id = pending_section.section_id
+                            pending.section_path = list(pending_section.section_path)
+                            pending_section.add_object(pending)
+                            objects.append(pending)
+                        pending_objects.clear()
                     current_section = self._start_section(
                         paper.paper_id,
                         section_accumulators,
@@ -413,9 +428,10 @@ class MinerULayoutV2Parser(BasePDFParser):
                 )
                 if object_record is None:
                     continue
-                if current_section is None:
-                    continue
                 object_ordinal += 1
+                if current_section is None:
+                    pending_objects.append(object_record)
+                    continue
                 object_record.section_id = current_section.section_id
                 object_record.section_path = list(current_section.section_path)
                 current_section.add_object(object_record)
@@ -423,6 +439,20 @@ class MinerULayoutV2Parser(BasePDFParser):
 
             if reference_reached:
                 break
+
+        if pending_objects:
+            pending_section = self._start_section(
+                paper.paper_id,
+                section_accumulators,
+                section_stack,
+                "Document",
+                pending_objects[0].page_idx,
+            )
+            for pending in pending_objects:
+                pending.section_id = pending_section.section_id
+                pending.section_path = list(pending_section.section_path)
+                pending_section.add_object(pending)
+                objects.append(pending)
 
         sections: list[SectionRecord] = []
         for accumulator in section_accumulators:
@@ -526,12 +556,14 @@ class MinerULayoutV2Parser(BasePDFParser):
             supplement = supplement_match[1] if supplement_match is not None else None
             caption = _extract_caption(block, supplement, kind="image")
             footnote = _extract_footnote(block, supplement, kind="image")
+            image_path = _resolve_image_path(supplement, artifact_dir)
             text = normalize_whitespace("\n\n".join(part for part in [caption, footnote] if part))
             if not text:
                 text = _extract_block_text(block)
-            if not text:
+            if not text and not image_path:
                 return None
-            image_path = _resolve_image_path(supplement, artifact_dir)
+            if not text:
+                text = "Figure"
             source_fields.extend(_non_empty_source_fields(("caption", caption), ("footnote", footnote), ("image_path", image_path or "")))
             if supplement_match is not None:
                 _consume_content_supplement(content_queues, page_idx, block_type, supplement_match[0])
@@ -832,14 +864,14 @@ def _extract_caption(block: dict[str, Any], supplement: dict[str, Any] | None, *
         "image": ("caption", "image_caption", "img_caption", "figure_caption"),
     }[kind]
     for key in keys:
-        value = block.get(key)
-        if isinstance(value, str) and normalize_whitespace(value):
-            return normalize_whitespace(value)
+        value = _extract_block_text(block.get(key))
+        if value:
+            return value
     if supplement is not None:
         for key in keys:
-            value = supplement.get(key)
-            if isinstance(value, str) and normalize_whitespace(value):
-                return normalize_whitespace(value)
+            value = _extract_block_text(supplement.get(key))
+            if value:
+                return value
     return ""
 
 
@@ -849,14 +881,14 @@ def _extract_footnote(block: dict[str, Any], supplement: dict[str, Any] | None, 
         "image": ("footnote", "image_footnote", "img_footnote", "figure_footnote"),
     }[kind]
     for key in keys:
-        value = block.get(key)
-        if isinstance(value, str) and normalize_whitespace(value):
-            return normalize_whitespace(value)
+        value = _extract_block_text(block.get(key))
+        if value:
+            return value
     if supplement is not None:
         for key in keys:
-            value = supplement.get(key)
-            if isinstance(value, str) and normalize_whitespace(value):
-                return normalize_whitespace(value)
+            value = _extract_block_text(supplement.get(key))
+            if value:
+                return value
     return ""
 
 

@@ -1249,8 +1249,8 @@ def test_layout_parser_builds_sections_objects_and_drops_references(tmp_path: Pa
                 {
                     "type": "image",
                     "page_idx": 0,
-                    "image_caption": "Figure 1: Overall pipeline.",
-                    "image_footnote": "Visual summary.",
+                    "image_caption": ["Figure 1: Overall pipeline."],
+                    "image_footnote": ["Visual summary."],
                     "img_path": "images/figure_1.png",
                 },
             ]
@@ -1278,11 +1278,80 @@ def test_layout_parser_builds_sections_objects_and_drops_references(tmp_path: Pa
     assert [section.section_title for section in bundle.sections] == ["1 Introduction", "2 Results"]
     assert all("reference" not in section.section_title.lower() for section in bundle.sections)
     assert {obj.object_type for obj in bundle.objects} == {"text_block", "table_block", "figure_block"}
+    assert any(obj.caption == "Figure 1: Overall pipeline." for obj in bundle.objects)
     assert {chunk.chunk_type for chunk in bundle.chunks} == {"text_chunk", "table_chunk", "figure_chunk"}
     assert any("GAIA 62.3" in chunk.text for chunk in bundle.chunks if chunk.chunk_type == "table_chunk")
     assert all("never be indexed" not in chunk.text.lower() for chunk in bundle.chunks)
     assert all(section.char_end > section.char_start for section in bundle.paper.sections)
     assert all(chunk.char_end > chunk.char_start for chunk in bundle.chunks)
+
+
+def test_layout_parser_keeps_image_without_caption_when_mineru_provides_image_path(tmp_path: Path) -> None:
+    settings = Settings.from_env(tmp_path)
+    paper_id = "2025.acl-long.1004"
+    parse_dir = settings.mineru_output_dir / paper_id / "auto"
+    parse_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "fake.pdf").write_bytes(b"%PDF-1.4\n%fake\n")
+    (parse_dir / f"{paper_id}.md").write_text("# fake markdown\n", encoding="utf-8")
+    (parse_dir / "images").mkdir(exist_ok=True)
+    image_path = parse_dir / "images" / "uncaptioned.jpg"
+    image_path.write_bytes(b"jpg")
+    (parse_dir / f"{paper_id}_middle.json").write_text(
+        json_dumps(
+            {
+                "pdf_info": [
+                    {
+                        "page_idx": 0,
+                        "para_blocks": [
+                            {"type": "title", "text": "Image-only Figure Paper"},
+                            {"type": "chart", "bbox": [10, 10, 100, 100]},
+                            {"type": "title", "text": "1 Introduction"},
+                            {"type": "text", "text": "The paper contains an image without a caption."},
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (parse_dir / f"{paper_id}_content_list.json").write_text(
+        json_dumps(
+            [
+                {
+                    "type": "chart",
+                    "page_idx": 0,
+                    "bbox": [10, 10, 100, 100],
+                    "image_caption": [],
+                    "image_footnote": [],
+                    "img_path": "images/uncaptioned.jpg",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    from chemverify.models import PaperRecord
+
+    bundle = PDFParser(settings).parse(
+        PaperRecord(
+            paper_id=paper_id,
+            anthology_id=paper_id,
+            title="Image-only Figure Paper",
+            authors=["Ada Lovelace"],
+            venue="acl",
+            year=2025,
+            track="long",
+            abstract="A parser regression fixture.",
+            url="https://example.com/image-only",
+            local_pdf_path=str(tmp_path / "fake.pdf"),
+        )
+    )
+
+    figures = [obj for obj in bundle.objects if obj.object_type == "figure_block"]
+    assert len(figures) == 1
+    assert figures[0].image_path == str(image_path.resolve())
+    assert figures[0].text == "Figure"
+    assert figures[0].section_path == ["Document"]
 
 
 def test_layout_parser_does_not_consume_table_supplement_on_empty_block(tmp_path: Path) -> None:
