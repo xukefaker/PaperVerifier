@@ -8,6 +8,8 @@ ChemSearch is an interactive system for search and question answering over local
 
 Put PDFs in a folder, build a local index, search the collection, and ask cited questions about a selected paper.
 
+![ChemSearch search interface](docs/assets/chemsearch-search-results.png)
+
 ## Requirements
 
 - `uv`
