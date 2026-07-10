@@ -1106,7 +1106,7 @@ export default function WorkbenchPage() {
                       name="paper-search-query"
                       value={searchQuery}
                       onChange={(event) => setSearchQuery(event.target.value)}
-                      className="min-h-48 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 outline-none transition focus:border-blue-500 focus:bg-white"
+                      className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 outline-none transition focus:border-blue-500 focus:bg-white"
                     />
                     <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-end">
                       <RetrievalPicker value={retrievalMethod} onChange={setRetrievalMethod} />
